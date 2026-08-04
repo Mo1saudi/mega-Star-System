@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useStore } from '../lib/store';
 import { SEO } from '../components/SEO';
+import { AddPilgrimModal } from '../components/AddPilgrimModal';
 import { 
   Users, FileCheck, ShieldCheck, QrCode, RefreshCw, 
   UserPlus, PlaneTakeoff, BedDouble, ArrowUpRight, CheckCircle2,
-  AlertTriangle, Hotel, Sparkles
+  AlertTriangle, Hotel, Sparkles, UserX, UserMinus
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
@@ -31,10 +32,15 @@ export const DashboardPage: React.FC = () => {
   const [newTripPnr, setNewTripPnr] = useState('');
 
   // KPIs Calculations
+  const withdrawnPilgrims = pilgrims.filter(p => p.is_withdrawn || /سحب|إلغاء|الغاء|ملغي|مسحوب/i.test(`${p.program || ''} ${p.notes || ''} ${p.withdrawal_status || ''}`));
+  const withdrawnCount = withdrawnPilgrims.length;
+  const activePilgrims = pilgrims.filter(p => !p.is_withdrawn && !/سحب|إلغاء|الغاء|ملغي|مسحوب/i.test(`${p.program || ''} ${p.notes || ''} ${p.withdrawal_status || ''}`));
+  const activePilgrimsCount = activePilgrims.length;
   const totalPilgrims = pilgrims.length;
-  const travelPermitsCount = pilgrims.filter(p => p.travel_permit_required).length;
-  const completedVisasCount = pilgrims.filter(p => p.visa_status === 'مكتملة').length;
-  const uploadedNusukCount = pilgrims.filter(p => p.barcode_status === 'مكتمل' || p.barcode_status === 'مرفوع').length;
+
+  const travelPermitsCount = activePilgrims.filter(p => p.travel_permit_required).length;
+  const completedVisasCount = activePilgrims.filter(p => p.visa_status === 'مكتملة').length;
+  const uploadedNusukCount = activePilgrims.filter(p => p.barcode_status === 'مكتمل' || p.barcode_status === 'مرفوع').length;
 
   // Chart 1: BarChart - Pilgrims distribution by hotel
   const hotelDistributionMap = new Map<string, number>();
@@ -144,68 +150,84 @@ export const DashboardPage: React.FC = () => {
       </div>
 
       {/* KPIs Cards Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1 */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-[#151c2d] border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
+        {/* KPI 1: Active Pilgrims */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#151c2d] border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 font-cairo">إجمالي المعتمرين</span>
-            <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
-              <Users className="w-5 h-5" />
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 font-cairo">المعتمرين الفعليين</span>
+            <div className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+              <Users className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div className="mt-4">
+          <div className="mt-3">
             <span className="text-2xl sm:text-3xl font-extrabold font-cairo text-slate-900 dark:text-white">
-              {totalPilgrims}
+              {activePilgrimsCount}
             </span>
-            <span className="text-xs text-slate-400 mr-2">معتمر مسجل</span>
+            <span className="text-[11px] text-slate-400 block sm:inline mr-1">نشط في الكشوفات</span>
           </div>
         </div>
 
-        {/* KPI 2 */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-[#151c2d] border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+        {/* KPI 2: Withdrawn & Cancelled Pilgrims */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-rose-500/5 dark:bg-rose-500/10 border border-rose-200/80 dark:border-rose-900/40 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 font-cairo">تصاريح السفر المطلوبة</span>
-            <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
-              <FileCheck className="w-5 h-5" />
+            <span className="text-xs font-bold text-rose-600 dark:text-rose-400 font-cairo">سحب وإلغاء (مستبعدون)</span>
+            <div className="p-2 rounded-xl bg-rose-500/15 text-rose-600 dark:text-rose-400">
+              <UserX className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div className="mt-4">
+          <div className="mt-3">
+            <span className="text-2xl sm:text-3xl font-extrabold font-cairo text-rose-600 dark:text-rose-400">
+              {withdrawnCount}
+            </span>
+            <span className="text-[11px] text-rose-500/80 block sm:inline mr-1">حالات ملغية من الشيت</span>
+          </div>
+        </div>
+
+        {/* KPI 3: Travel Permits */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#151c2d] border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 font-cairo">تصاريح السفر</span>
+            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              <FileCheck className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+          </div>
+          <div className="mt-3">
             <span className="text-2xl sm:text-3xl font-extrabold font-cairo text-amber-600 dark:text-amber-400">
               {travelPermitsCount}
             </span>
-            <span className="text-xs text-slate-400 mr-2">تصريح يلزم متابعته</span>
+            <span className="text-[11px] text-slate-400 block sm:inline mr-1">تصريح يلزم متابعته</span>
           </div>
         </div>
 
-        {/* KPI 3 */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-[#151c2d] border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+        {/* KPI 4: Visas Completed */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#151c2d] border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 dark:text-slate-400 font-cairo">التأشيرات المكتملة</span>
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-              <ShieldCheck className="w-5 h-5" />
+            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div className="mt-4">
+          <div className="mt-3">
             <span className="text-2xl sm:text-3xl font-extrabold font-cairo text-emerald-600 dark:text-emerald-400">
               {completedVisasCount}
             </span>
-            <span className="text-xs text-slate-400 mr-2">من أصل {totalPilgrims}</span>
+            <span className="text-[11px] text-slate-400 block sm:inline mr-1">من أصل {activePilgrimsCount}</span>
           </div>
         </div>
 
-        {/* KPI 4 */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-[#151c2d] border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+        {/* KPI 5: Nusuk Uploads */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#151c2d] border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 dark:text-slate-400 font-cairo">الرفع على نسك</span>
-            <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
-              <QrCode className="w-5 h-5" />
+            <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+              <QrCode className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div className="mt-4">
+          <div className="mt-3">
             <span className="text-2xl sm:text-3xl font-extrabold font-cairo text-purple-600 dark:text-purple-400">
               {uploadedNusukCount}
             </span>
-            <span className="text-xs text-slate-400 mr-2">باركود جاهز</span>
+            <span className="text-[11px] text-slate-400 block sm:inline mr-1">باركود جاهز</span>
           </div>
         </div>
       </div>
@@ -310,82 +332,11 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal: Add Pilgrim */}
-      {showAddPilgrimModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-[#151c2d] w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4">
-            <h3 className="text-lg font-bold font-cairo text-slate-900 dark:text-white">إضافة معتمر جديد</h3>
-            <form onSubmit={handleCreatePilgrimSubmit} className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">الاسم الكامل</label>
-                <input
-                  type="text"
-                  required
-                  value={newPilgrimName}
-                  onChange={e => setNewPilgrimName(e.target.value)}
-                  placeholder="مثال: عبد الله أحمد النجار"
-                  className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">رقم الجواز</label>
-                <input
-                  type="text"
-                  required
-                  value={newPilgrimPassport}
-                  onChange={e => setNewPilgrimPassport(e.target.value)}
-                  placeholder="مثال: A2948102"
-                  className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">الجنس</label>
-                  <select
-                    value={newPilgrimGender}
-                    onChange={e => setNewPilgrimGender(e.target.value as any)}
-                    className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
-                  >
-                    <option value="ذكر">ذكر</option>
-                    <option value="أنثى">أنثى</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">فندق مكة المكرمة</label>
-                  <select
-                    value={newPilgrimMakkahHotel}
-                    onChange={e => setNewPilgrimMakkahHotel(e.target.value)}
-                    className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
-                  >
-                    <option value="فندق أنجم مكة">فندق أنجم مكة</option>
-                    <option value="فندق أبراج القصواء مكة">فندق أبراج القصواء</option>
-                    <option value="فندق بولمان زمزم مكة">فندق بولمان زمزم</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowAddPilgrimModal(false)}
-                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
-                >
-                  إلغاء
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 text-xs font-bold bg-amber-500 text-slate-950 rounded-xl hover:bg-amber-600"
-                >
-                  حفظ المعتمر
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Modal: Add Pilgrim (MegaStar Tourism Flow) */}
+      <AddPilgrimModal
+        isOpen={showAddPilgrimModal}
+        onClose={() => setShowAddPilgrimModal(false)}
+      />
 
       {/* Modal: Add Trip */}
       {showAddTripModal && (

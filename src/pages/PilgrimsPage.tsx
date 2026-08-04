@@ -1,20 +1,22 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useStore } from '../lib/store';
 import { SEO } from '../components/SEO';
+import { AddPilgrimModal } from '../components/AddPilgrimModal';
 import { Pilgrim, RoomType, VisaStatus, BarcodeStatus } from '../types';
 import { 
   Users, Search, Hotel, FileSpreadsheet, Camera, Plus, 
   Trash2, Edit3, CheckSquare, Square, Download, Upload, 
-  Filter, Check, AlertCircle, Sparkles, UserCheck, ShieldAlert
+  Filter, Check, AlertCircle, Sparkles, UserCheck, ShieldAlert,
+  SlidersHorizontal, X, RotateCcw, CreditCard, Plane
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 
 export const PilgrimsPage: React.FC = () => {
   const { 
-    pilgrims, roomings, selectedHotelFilter, searchQuery,
-    addPilgrim, updatePilgrim, deletePilgrim, bulkUpdatePilgrims, 
-    bulkDeletePilgrims, importPilgrims, ocrExtractPassport 
+    pilgrims, trips, roomings, selectedHotelFilter, setSelectedHotelFilter,
+    searchQuery, setSearchQuery, addPilgrim, updatePilgrim, deletePilgrim, 
+    bulkUpdatePilgrims, bulkDeletePilgrims, importPilgrims, ocrExtractPassport 
   } = useStore();
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -22,6 +24,54 @@ export const PilgrimsPage: React.FC = () => {
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   const [showOcrModal, setShowOcrModal] = useState(false);
   const [editingPilgrim, setEditingPilgrim] = useState<Pilgrim | null>(null);
+
+  // Advanced Search & Filter States
+  const [searchPassport, setSearchPassport] = useState('');
+  const [selectedAgent, setSelectedAgent] = useState('all');
+  const [selectedTrip, setSelectedTrip] = useState('all');
+  const [selectedGender, setSelectedGender] = useState('all');
+  const [selectedVisaStatus, setSelectedVisaStatus] = useState('all');
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(true);
+
+  // Deletion Confirmation States
+  const [deletingPilgrimTarget, setDeletingPilgrimTarget] = useState<Pilgrim | null>(null);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+
+  // Single Pilgrim Excel Export
+  const handleExportSinglePilgrim = async (p: Pilgrim) => {
+    try {
+      const item = p as any;
+      // 2. Generate downloadable Excel sheet formatted for sheet tab "الرئيسيه"
+      const rowData = [{
+        'م': 1,
+        'الاسم': item.name || '',
+        'المندوب': item.agent_main || 'شركة ميجا ستار للسياحة',
+        'المندوب الفرعى': item.agent_sub || 'فرع المبيعات المباشرة',
+        'رقم الجواز': item.passport_number || '',
+        'تصاريح': item.travel_permit || (item.travel_permit_required ? 'يلزم تصريح' : 'لا يلزم') || 'نعم',
+        'غرف خاصه': item.room_type || item.room_spec || 'رباعي',
+        'النوع': item.gender || 'ذكر',
+        'البرنامج': item.program || item.program_type || 'برنامج عمره',
+        'نوع التأشيرة': item.visa_type || item.visa_sponsor || 'عمرة إلكترونية',
+        'الباركود': item.barcode || item.barcode_status || 'مكتمل',
+        'ملاحظات': item.notes || '',
+        'فندق مكه': item.makkah_hotel || '',
+        'فندق المدينه': item.madinah_hotel || '',
+        'اسم الرحله': item.trip_name || 'رحلة العمرة الرئيسية'
+      }];
+
+      const ws = XLSX.utils.json_to_sheet(rowData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'الرئيسيه');
+
+      const fileName = `معتمر_${item.name.replace(/\s+/g, '_')}_${item.passport_number || 'جواز'}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+
+      toast.success(`تم تصدير المعتمر (${item.name}) لشيت الإكسيل (ورقة الرئيسية) أونلاين وتحميل الملف 🟢`);
+    } catch (err) {
+      toast.error('حدث خطأ أثناء تصدير بيانات المعتمر');
+    }
+  };
 
   // Form states
   const [formData, setFormData] = useState<Partial<Pilgrim>>({
@@ -48,11 +98,79 @@ export const PilgrimsPage: React.FC = () => {
   const excelFileRef = useRef<HTMLInputElement>(null);
   const passportFileRef = useRef<HTMLInputElement>(null);
 
-  // Filter Pilgrims by search & hotel filter
+  // Extract unique hotels for filter
+  const uniqueHotels = useMemo(() => {
+    const hotelsSet = new Set<string>();
+    pilgrims.forEach(p => {
+      if (p.makkah_hotel) hotelsSet.add(p.makkah_hotel.trim());
+      if (p.madinah_hotel) hotelsSet.add(p.madinah_hotel.trim());
+    });
+    return Array.from(hotelsSet).sort();
+  }, [pilgrims]);
+
+  // Extract unique agents for filter
+  const uniqueAgents = useMemo(() => {
+    const agentsSet = new Set<string>();
+    pilgrims.forEach(p => {
+      if (p.agent_main && p.agent_main.trim()) agentsSet.add(p.agent_main.trim());
+      if (p.agent_sub && p.agent_sub.trim()) agentsSet.add(p.agent_sub.trim());
+    });
+    return Array.from(agentsSet).sort();
+  }, [pilgrims]);
+
+  // Extract unique trips for filter
+  const uniqueTrips = useMemo(() => {
+    const tripsSet = new Set<string>();
+    if (trips) {
+      trips.forEach(t => {
+        if (t.trip_name) tripsSet.add(t.trip_name.trim());
+      });
+    }
+    pilgrims.forEach(p => {
+      if (p.trip_id && p.trip_id.trim()) tripsSet.add(p.trip_id.trim());
+      if (p.trip_number && p.trip_number.trim()) tripsSet.add(p.trip_number.trim());
+      if (p.program && p.program.trim()) tripsSet.add(p.program.trim());
+    });
+    return Array.from(tripsSet).sort();
+  }, [trips, pilgrims]);
+
+  // Active filters count
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (searchQuery.trim()) count++;
+    if (searchPassport.trim()) count++;
+    if (selectedAgent && selectedAgent !== 'all') count++;
+    if (selectedTrip && selectedTrip !== 'all') count++;
+    if (selectedHotelFilter && selectedHotelFilter !== 'all') count++;
+    if (selectedGender && selectedGender !== 'all') count++;
+    if (selectedVisaStatus && selectedVisaStatus !== 'all') count++;
+    return count;
+  }, [searchQuery, searchPassport, selectedAgent, selectedTrip, selectedHotelFilter, selectedGender, selectedVisaStatus]);
+
+  const resetAllFilters = () => {
+    setSearchQuery('');
+    setSearchPassport('');
+    setSelectedAgent('all');
+    setSelectedTrip('all');
+    setSelectedHotelFilter('all');
+    setSelectedGender('all');
+    setSelectedVisaStatus('all');
+  };
+
+  // Filter Pilgrims by advanced search & hotel filter
   const filteredPilgrims = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    const passQ = searchPassport.toLowerCase().trim();
+    const agentQ = selectedAgent.toLowerCase().trim();
+    const tripQ = selectedTrip.toLowerCase().trim();
+
     return pilgrims.filter(p => {
-      const matchesHotel = selectedHotelFilter === 'all' || p.makkah_hotel === selectedHotelFilter || p.madinah_hotel === selectedHotelFilter;
-      const q = searchQuery.toLowerCase().trim();
+      // 1. Hotel filter
+      const matchesHotel = selectedHotelFilter === 'all' || 
+        p.makkah_hotel === selectedHotelFilter || 
+        p.madinah_hotel === selectedHotelFilter;
+
+      // 2. Global search query
       const matchesQuery = !q || 
         p.name.toLowerCase().includes(q) || 
         p.passport_number.toLowerCase().includes(q) ||
@@ -64,10 +182,30 @@ export const PilgrimsPage: React.FC = () => {
         (p.trip_number && p.trip_number.toLowerCase().includes(q)) ||
         (p.notes && p.notes.toLowerCase().includes(q)) ||
         (p.room_number && p.room_number.includes(q));
-      
-      return matchesHotel && matchesQuery;
+
+      // 3. Passport Number filter
+      const matchesPassport = !passQ || p.passport_number.toLowerCase().includes(passQ);
+
+      // 4. Agent Name filter
+      const matchesAgent = !agentQ || agentQ === 'all' || 
+        p.agent_main.toLowerCase().includes(agentQ) || 
+        (p.agent_sub && p.agent_sub.toLowerCase().includes(agentQ));
+
+      // 5. Trip Name filter
+      const matchesTrip = !tripQ || tripQ === 'all' || 
+        (p.trip_id && p.trip_id.toLowerCase().includes(tripQ)) ||
+        (p.trip_number && p.trip_number.toLowerCase().includes(tripQ)) ||
+        (p.program && p.program.toLowerCase().includes(tripQ));
+
+      // 6. Gender filter
+      const matchesGender = selectedGender === 'all' || p.gender === selectedGender;
+
+      // 7. Visa status filter
+      const matchesVisa = selectedVisaStatus === 'all' || p.visa_status === selectedVisaStatus;
+
+      return matchesHotel && matchesQuery && matchesPassport && matchesAgent && matchesTrip && matchesGender && matchesVisa;
     });
-  }, [pilgrims, selectedHotelFilter, searchQuery]);
+  }, [pilgrims, selectedHotelFilter, searchQuery, searchPassport, selectedAgent, selectedTrip, selectedGender, selectedVisaStatus]);
 
   // Grouping MUST BE by Makkah Hotel as required!
   const groupedByMakkahHotel = useMemo(() => {
@@ -356,6 +494,233 @@ export const PilgrimsPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Advanced Search & Filter Bar */}
+      <div className="bg-white dark:bg-[#151c2d] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
+        {/* Main Search Controls Row */}
+        <div className="flex flex-col md:flex-row items-center gap-3">
+          {/* General Quick Search Input */}
+          <div className="relative flex-1 w-full">
+            <Search className="w-4 h-4 absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="البحث السريع (الاسم الكامل، رقم الغرفة، الملاحظات...)"
+              className="w-full pr-10 pl-9 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all font-medium"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute left-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Quick Hotel Select */}
+          <div className="relative w-full md:w-56">
+            <Hotel className="w-4 h-4 absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <select
+              value={selectedHotelFilter}
+              onChange={(e) => setSelectedHotelFilter(e.target.value)}
+              className="w-full pr-10 pl-3 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all appearance-none font-medium cursor-pointer"
+            >
+              <option value="all">جميع الفنادق</option>
+              {uniqueHotels.map(h => (
+                <option key={h} value={h}>{h}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Advanced Search Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setIsAdvancedOpen(prev => !prev)}
+            className={`flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-extrabold rounded-xl border transition-all cursor-pointer whitespace-nowrap w-full md:w-auto ${
+              isAdvancedOpen || activeFiltersCount > 0
+                ? 'bg-amber-500/10 border-amber-500/40 text-amber-600 dark:text-amber-400'
+                : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+            }`}
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            <span>الفلترة المتقدمة</span>
+            {activeFiltersCount > 0 && (
+              <span className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 text-[11px] font-black flex items-center justify-center">
+                {activeFiltersCount}
+              </span>
+            )}
+          </button>
+
+          {/* Reset Filters Button */}
+          {activeFiltersCount > 0 && (
+            <button
+              type="button"
+              onClick={resetAllFilters}
+              className="flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-xl transition-all cursor-pointer whitespace-nowrap w-full md:w-auto"
+              title="تفريغ كل خيارات البحث والتصفية"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>إعادة ضبط</span>
+            </button>
+          )}
+        </div>
+
+        {/* Expandable Advanced Filter Panel */}
+        {isAdvancedOpen && (
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 animate-fade-in">
+            {/* 1. Filter by Passport Number */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                <CreditCard className="w-3.5 h-3.5 text-amber-500" />
+                <span>رقم الجواز</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchPassport}
+                  onChange={(e) => setSearchPassport(e.target.value)}
+                  placeholder="ابحث برقم الجواز..."
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                />
+                {searchPassport && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchPassport('')}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 2. Filter by Agent */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                <UserCheck className="w-3.5 h-3.5 text-amber-500" />
+                <span>اسم المندوب / الشركة</span>
+              </label>
+              <select
+                value={selectedAgent}
+                onChange={(e) => setSelectedAgent(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/30 cursor-pointer font-medium"
+              >
+                <option value="all">كل المندوبين والفروع</option>
+                {uniqueAgents.map(ag => (
+                  <option key={ag} value={ag}>{ag}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* 3. Filter by Trip Name / Program */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                <Plane className="w-3.5 h-3.5 text-amber-500" />
+                <span>اسم / رقم الرحلة والبرنامج</span>
+              </label>
+              <select
+                value={selectedTrip}
+                onChange={(e) => setSelectedTrip(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/30 cursor-pointer font-medium"
+              >
+                <option value="all">كل الرحلات والبرامج</option>
+                {uniqueTrips.map(tr => (
+                  <option key={tr} value={tr}>{tr}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* 4. Gender & Visa Status */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                <Filter className="w-3.5 h-3.5 text-amber-500" />
+                <span>الجنس وحالة التأشيرة</span>
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                <select
+                  value={selectedGender}
+                  onChange={(e) => setSelectedGender(e.target.value)}
+                  className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-[11px] text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/30 cursor-pointer"
+                >
+                  <option value="all">الكل (الجنس)</option>
+                  <option value="ذكر">ذكر</option>
+                  <option value="أنثى">أنثى</option>
+                </select>
+
+                <select
+                  value={selectedVisaStatus}
+                  onChange={(e) => setSelectedVisaStatus(e.target.value)}
+                  className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-[11px] text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/30 cursor-pointer"
+                >
+                  <option value="all">الكل (التأشيرة)</option>
+                  <option value="مكتملة">مكتملة</option>
+                  <option value="قيد الإجراء">قيد الإجراء</option>
+                  <option value="لم تبدأ">لم تبدأ</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Active Filter Badges Bar */}
+        {activeFiltersCount > 0 && (
+          <div className="pt-2 flex flex-wrap items-center gap-2 text-xs border-t border-slate-100 dark:border-slate-800">
+            <span className="text-[11px] font-bold text-slate-400">الفلاتر المطبقة حالياً:</span>
+
+            {searchQuery && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20 font-medium">
+                بحث: "{searchQuery}"
+                <button type="button" onClick={() => setSearchQuery('')} className="hover:text-amber-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+
+            {searchPassport && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20 font-mono font-bold">
+                جواز: {searchPassport}
+                <button type="button" onClick={() => setSearchPassport('')} className="hover:text-purple-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+
+            {selectedAgent !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20 font-medium">
+                المندوب: {selectedAgent}
+                <button type="button" onClick={() => setSelectedAgent('all')} className="hover:text-blue-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+
+            {selectedTrip !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 font-medium">
+                الرحلة: {selectedTrip}
+                <button type="button" onClick={() => setSelectedTrip('all')} className="hover:text-emerald-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+
+            {selectedHotelFilter !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20 font-medium">
+                الفندق: {selectedHotelFilter}
+                <button type="button" onClick={() => setSelectedHotelFilter('all')} className="hover:text-amber-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+
+            {selectedGender !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-medium">
+                الجنس: {selectedGender}
+                <button type="button" onClick={() => setSelectedGender('all')} className="hover:text-slate-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+
+            {selectedVisaStatus !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-medium">
+                التأشيرة: {selectedVisaStatus}
+                <button type="button" onClick={() => setSelectedVisaStatus('all')} className="hover:text-slate-900"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Bulk Selection Bar */}
       {selectedIds.length > 0 && (
         <div className="flex items-center justify-between p-3.5 bg-amber-500/15 border border-amber-500/30 rounded-2xl text-amber-900 dark:text-amber-200 text-xs font-bold animate-fade-in">
@@ -371,13 +736,8 @@ export const PilgrimsPage: React.FC = () => {
               تعديل جماعي
             </button>
             <button
-              onClick={() => {
-                if (confirm(`هل أنت تأكد من رغبتك في حذف ${selectedIds.length} معتمر؟`)) {
-                  bulkDeletePilgrims(selectedIds);
-                  setSelectedIds([]);
-                }
-              }}
-              className="px-3 py-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 text-xs font-bold transition-all"
+              onClick={() => setShowBulkDeleteConfirm(true)}
+              className="px-3 py-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 text-xs font-bold transition-all cursor-pointer"
             >
               حذف المحدد
             </button>
@@ -479,18 +839,23 @@ export const PilgrimsPage: React.FC = () => {
                         <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1">
                             <button
+                              onClick={() => handleExportSinglePilgrim(p)}
+                              className="p-1.5 rounded-lg text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-all cursor-pointer"
+                              title="تصدير لشيت الإكسيل (ورقة الرئيسية)"
+                            >
+                              <FileSpreadsheet className="w-3.5 h-3.5" />
+                            </button>
+                            <button
                               onClick={() => { setEditingPilgrim(p); setFormData(p); setShowAddModal(true); }}
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
                               title="تعديل"
                             >
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={() => {
-                                if (confirm(`هل أنت تأكد من حذف المعتمر ${p.name}؟`)) deletePilgrim(p.id);
-                              }}
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
-                              title="حذف"
+                              onClick={() => setDeletingPilgrimTarget(p)}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
+                              title="حذف المعتمر"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -541,14 +906,22 @@ export const PilgrimsPage: React.FC = () => {
                       </span>
                       <div className="flex items-center gap-2">
                         <button
+                          onClick={() => handleExportSinglePilgrim(p)}
+                          className="px-2.5 py-1 text-xs font-bold text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg cursor-pointer transition-all flex items-center gap-1"
+                          title="تصدير إكسيل"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                          تصدير إكسيل
+                        </button>
+                        <button
                           onClick={() => { setEditingPilgrim(p); setFormData(p); setShowAddModal(true); }}
-                          className="px-2.5 py-1 text-xs font-bold text-amber-600 bg-amber-500/10 rounded-lg"
+                          className="px-2.5 py-1 text-xs font-bold text-amber-600 bg-amber-500/10 rounded-lg cursor-pointer"
                         >
                           تعديل
                         </button>
                         <button
-                          onClick={() => { if (confirm('تأكيد الحذف؟')) deletePilgrim(p.id); }}
-                          className="px-2.5 py-1 text-xs font-bold text-rose-600 bg-rose-500/10 rounded-lg"
+                          onClick={() => setDeletingPilgrimTarget(p)}
+                          className="px-2.5 py-1 text-xs font-bold text-rose-600 bg-rose-500/10 hover:bg-rose-500/20 rounded-lg cursor-pointer transition-all"
                         >
                           حذف
                         </button>
@@ -562,12 +935,19 @@ export const PilgrimsPage: React.FC = () => {
         );
       })}
 
-      {/* Modal: Add/Edit Pilgrim */}
-      {showAddModal && (
+      {/* Modal: Add Pilgrim (MegaStar Tourism - Manual & OCR Batch Flow) */}
+      <AddPilgrimModal
+        isOpen={showAddModal && !editingPilgrim}
+        onClose={() => setShowAddModal(false)}
+        initialPassportData={formData}
+      />
+
+      {/* Modal: Edit Existing Pilgrim */}
+      {showAddModal && editingPilgrim && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-white dark:bg-[#151c2d] w-full max-w-lg rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4 my-8">
             <h3 className="text-lg font-bold font-cairo text-slate-900 dark:text-white">
-              {editingPilgrim ? 'تعديل بيانات المعتمر' : 'إضافة معتمر جديد إلى السجل'}
+              تعديل بيانات المعتمر
             </h3>
 
             <form onSubmit={handleSavePilgrim} className="space-y-3 text-right">
@@ -742,23 +1122,31 @@ export const PilgrimsPage: React.FC = () => {
                 />
               </div>
 
-              <div className="flex items-center gap-2 pt-2">
+              <div className="flex items-start gap-2 pt-2">
                 <input
                   type="checkbox"
                   id="travel_permit"
-                  checked={formData.travel_permit_required || false}
+                  disabled={formData.gender === 'أنثى'}
+                  checked={formData.gender === 'أنثى' ? false : (formData.travel_permit_required || false)}
                   onChange={e => setFormData({ ...formData, travel_permit_required: e.target.checked })}
-                  className="rounded text-amber-500 focus:ring-amber-500"
+                  className="mt-0.5 rounded text-amber-500 focus:ring-amber-500 disabled:opacity-40 cursor-pointer"
                 />
-                <label htmlFor="travel_permit" className="text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
-                  يلزم استخراج تصريح سفر خاص
-                </label>
+                <div>
+                  <label htmlFor="travel_permit" className={`text-xs font-bold ${formData.gender === 'أنثى' ? 'text-slate-400' : 'text-slate-700 dark:text-slate-300'} cursor-pointer block`}>
+                    تصريح سفر الجيش / التجنيد
+                  </label>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    {formData.gender === 'أنثى' 
+                      ? 'غير مطلوب للإناث (للذكور والشباب فقط من سن 18 حتى 45 سنة)' 
+                      : 'مطلوب للذكور والشباب المصريين من سن 18 إلى 45 سنة'}
+                  </p>
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => { setShowAddModal(false); setEditingPilgrim(null); }}
                   className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
                 >
                   إلغاء
@@ -842,6 +1230,89 @@ export const PilgrimsPage: React.FC = () => {
                   تطبيق التعديلات
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Delete Single Pilgrim */}
+      {deletingPilgrimTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white dark:bg-[#151c2d] w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4 font-cairo">
+            <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
+              <div className="p-3 bg-rose-500/10 rounded-2xl">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 dark:text-white">تأكيد حذف المعتمر</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">سيتم مسح المعتمر وتحديث بيانات الشيت مباشرة أونلاين</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 text-xs space-y-1 text-right">
+              <p className="font-bold text-slate-900 dark:text-white">{deletingPilgrimTarget.name}</p>
+              <p className="text-slate-500">رقم الجواز: <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">{deletingPilgrimTarget.passport_number}</span></p>
+              <p className="text-slate-500">فندق مكة: <span className="font-semibold text-slate-700 dark:text-slate-300">{deletingPilgrimTarget.makkah_hotel || 'غير محدد'}</span></p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingPilgrimTarget(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deletePilgrim(deletingPilgrimTarget.id);
+                  setDeletingPilgrimTarget(null);
+                }}
+                className="px-4 py-2 text-xs font-extrabold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-all shadow-md shadow-rose-600/20 cursor-pointer"
+              >
+                نعم، تأكيد الحذف
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Bulk Delete Pilgrims */}
+      {showBulkDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white dark:bg-[#151c2d] w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4 font-cairo text-right">
+            <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
+              <div className="p-3 bg-rose-500/10 rounded-2xl">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 dark:text-white">حذف جماعي للمعتمرين</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  هل أنت متأكد من حذف <span className="font-extrabold text-rose-600 dark:text-rose-400 text-sm">{selectedIds.length}</span> معتمر محدد من الكشف؟
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteConfirm(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  bulkDeletePilgrims(selectedIds);
+                  setSelectedIds([]);
+                  setShowBulkDeleteConfirm(false);
+                }}
+                className="px-4 py-2 text-xs font-extrabold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-all shadow-md shadow-rose-600/20 cursor-pointer"
+              >
+                تأكيد الحذف الجماعي
+              </button>
             </div>
           </div>
         </div>

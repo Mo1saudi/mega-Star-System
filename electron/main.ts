@@ -10,6 +10,7 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 function getAppDataDirectories() {
   const userAppData = app.getPath('userData');
   const dirs = {
+    userData: userAppData,
     database: path.join(userAppData, 'Database'),
     passports: path.join(userAppData, 'UploadedPassports'),
     excel: path.join(userAppData, 'ImportedExcel'),
@@ -27,14 +28,19 @@ function getAppDataDirectories() {
   return dirs;
 }
 
+const getDbFilePath = () => {
+  const dirs = getAppDataDirectories();
+  return path.join(dirs.database, 'megastar_db.json');
+};
+
 function createWindow() {
   const dirs = getAppDataDirectories();
 
   mainWindow = new BrowserWindow({
-    width: 1366,
-    height: 768,
+    width: 1400,
+    height: 850,
     minWidth: 1024,
-    minHeight: 600,
+    minHeight: 650,
     title: 'ميجا ستار - إدارة عمليات العمرة',
     icon: path.join(__dirname, '../public/icon.ico'),
     frame: true,
@@ -44,8 +50,8 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-      sandbox: true,
-      webSecurity: true
+      sandbox: false,
+      webSecurity: false
     }
   });
 
@@ -74,7 +80,7 @@ function createTray() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'إظهار التطبيق',
+      label: 'إظهار التطبيق الرئيسي',
       click: () => {
         if (mainWindow) {
           mainWindow.show();
@@ -83,14 +89,14 @@ function createTray() {
       }
     },
     {
-      label: 'إعادة فتح الخادم',
+      label: 'إعادة تحميل الواجهة',
       click: () => {
         if (mainWindow) mainWindow.reload();
       }
     },
     { type: 'separator' },
     {
-      label: 'إغلاق النهائيا',
+      label: 'إغلاق النظام نهائياً',
       click: () => {
         if (mainWindow) {
           mainWindow.destroy();
@@ -109,7 +115,43 @@ function createTray() {
   });
 }
 
-// IPC Handlers
+// Database IPC Handlers (Persistent File/SQLite store in AppData/Database)
+ipcMain.handle('db-read', async () => {
+  try {
+    const dbPath = getDbFilePath();
+    if (fs.existsSync(dbPath)) {
+      const content = fs.readFileSync(dbPath, 'utf-8');
+      if (content && content.trim().length > 0) {
+        return JSON.parse(content);
+      }
+    }
+    return null;
+  } catch (err) {
+    console.error('Electron DB Read Error:', err);
+    return null;
+  }
+});
+
+ipcMain.handle('db-write', async (_, snapshot) => {
+  try {
+    const dirs = getAppDataDirectories();
+    const dbPath = getDbFilePath();
+    
+    // Save to primary DB file
+    fs.writeFileSync(dbPath, JSON.stringify(snapshot, null, 2), 'utf-8');
+
+    // Create periodic automatic backup file in AppData/Backups
+    const backupPath = path.join(dirs.backups, `megastar_backup_${new Date().toISOString().split('T')[0]}.json`);
+    fs.writeFileSync(backupPath, JSON.stringify(snapshot, null, 2), 'utf-8');
+
+    return true;
+  } catch (err) {
+    console.error('Electron DB Write Error:', err);
+    return false;
+  }
+});
+
+// Utility IPC Handlers
 ipcMain.handle('show-notification', (_, { title, body }) => {
   if (Notification.isSupported()) {
     new Notification({ title, body, icon: path.join(__dirname, '../public/icon.png') }).show();

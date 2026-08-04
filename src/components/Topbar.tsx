@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../lib/store';
-import { Search, Undo2, Redo2, Hotel, Moon, Sun, RefreshCw, Download, Monitor, Shield, Cloud } from 'lucide-react';
+import { Search, Undo2, Redo2, Hotel, Moon, Sun, RefreshCw, Download, Monitor, Shield, Cloud, CheckCircle2, Link2 } from 'lucide-react';
 import { ExeDownloadModal } from './ExeDownloadModal';
 import { AuthModal } from './AuthModal';
 import { HostingGuideModal } from './HostingGuideModal';
@@ -17,6 +17,7 @@ export const Topbar: React.FC = () => {
     canUndo, canRedo, undo, redo,
     theme, toggleTheme,
     syncFromGoogleSheets,
+    isGoogleConnected, googleUserEmail, handleGoogleSignIn, handleGoogleLogout,
     currentRole
   } = useStore();
 
@@ -86,15 +87,29 @@ export const Topbar: React.FC = () => {
               </button>
             </div>
 
-            {/* Google Sheet Sync Button */}
-            <button
-              onClick={syncFromGoogleSheets}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30 rounded-xl transition-all shrink-0"
-              title="تحديث بيانات المعتمرين مباشرة من شيت جوجل المعتمد وتجاهل الخلايا الفارغة"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">مزامنة الشيت</span>
-            </button>
+            {/* Google Sheet Sync & Connection Badge */}
+            <div className="flex items-center gap-1">
+              {isGoogleConnected ? (
+                <button
+                  onClick={syncFromGoogleSheets}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 rounded-xl transition-all shrink-0"
+                  title={`مربوط كـ ${googleUserEmail} - انقر لإجراء مزامنة يدوية فورية`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">مزامنة ثنائية نشطة</span>
+                </button>
+              ) : (
+                <button
+                  onClick={handleGoogleSignIn}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-sm transition-all shrink-0"
+                  title="ربط حساب جوجل لتفعيل المزامنة المباشرة وثنائية الاتجاه مع Google Sheets"
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  <span>ربط Google Sheet</span>
+                </button>
+              )}
+            </div>
 
             {/* Free Hosting Guide Button */}
             <button

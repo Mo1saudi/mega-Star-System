@@ -11,15 +11,63 @@ const STORE_NAME = 'appData';
 const DATA_KEY = 'latest_snapshot';
 
 /**
- * Local Database Manager supporting IndexedDB with LocalStorage fallback
- * Automatically seeds initial mock data on first launch.
+ * Migration Function: Seed & migrate initial mock-data into local SQLite / AppData database store
+ */
+export async function migrateMockDataToSQLite(): Promise<AppSnapshot> {
+  const seedSnapshot: AppSnapshot = {
+    pilgrims: [...initialPilgrims],
+    trips: [...initialTrips],
+    roomings: [...initialRoomings],
+    staff: [...initialStaff],
+    transports: [...initialTransports],
+    familyGroups: [...initialFamilyGroups],
+    financeRecords: [...initialFinanceRecords],
+    documents: [...initialDocuments],
+    notifications: [...initialNotifications],
+    closings: [...initialClosings],
+    currentRole: 'admin',
+  };
+
+  if (typeof window !== 'undefined') {
+    await saveLocalDatabaseStore(seedSnapshot);
+  }
+
+  return seedSnapshot;
+}
+
+/**
+ * Local Database Manager supporting Desktop Persistent File/SQLite DB (AppData/Database),
+ * as well as IndexedDB with LocalStorage fallback for browser environment.
  */
 export async function getLocalDatabaseStore(): Promise<AppSnapshot> {
-  // Check if window object exists
   if (typeof window === 'undefined') {
     return getSeedSnapshot();
   }
 
+  // 1. Electron Desktop Persistent DB (AppData/Database/megastar_db.json)
+  if (window.electronAPI?.dbRead) {
+    try {
+      const desktopData = await window.electronAPI.dbRead();
+      if (desktopData && desktopData.pilgrims && desktopData.pilgrims.length > 0) {
+        return {
+          ...desktopData,
+          financeRecords: desktopData.financeRecords || initialFinanceRecords,
+          documents: desktopData.documents || initialDocuments,
+          notifications: desktopData.notifications || initialNotifications,
+          closings: desktopData.closings || initialClosings,
+          currentRole: desktopData.currentRole || 'admin',
+        };
+      } else {
+        // Automatic First-Run Migration from mock-data.ts to AppData DB
+        return await migrateMockDataToSQLite();
+      }
+    } catch (e) {
+      console.warn('Electron Desktop DB read warning, initiating migration:', e);
+      return await migrateMockDataToSQLite();
+    }
+  }
+
+  // 2. Web LocalStorage fallback
   try {
     const savedLocal = localStorage.getItem(DATA_KEY);
     if (savedLocal) {
@@ -39,10 +87,10 @@ export async function getLocalDatabaseStore(): Promise<AppSnapshot> {
     console.warn('LocalStorage read warning:', e);
   }
 
-  // Try IndexedDB
+  // 3. Web IndexedDB fallback
   return new Promise((resolve) => {
     if (!window.indexedDB) {
-      resolve(getSeedSnapshot());
+      resolve(migrateMockDataToSQLite());
       return;
     }
 
@@ -73,34 +121,37 @@ export async function getLocalDatabaseStore(): Promise<AppSnapshot> {
             currentRole: res.currentRole || 'admin',
           });
         } else {
-          const seed = getSeedSnapshot();
-          saveLocalDatabaseStore(seed);
-          resolve(seed);
+          resolve(migrateMockDataToSQLite());
         }
       };
 
-      getReq.onerror = () => {
-        resolve(getSeedSnapshot());
-      };
+      getReq.onerror = () => resolve(migrateMockDataToSQLite());
     };
 
-    request.onerror = () => {
-      resolve(getSeedSnapshot());
-    };
+    request.onerror = () => resolve(migrateMockDataToSQLite());
   });
 }
 
 export async function saveLocalDatabaseStore(data: AppSnapshot): Promise<boolean> {
   if (typeof window === 'undefined') return false;
 
-  // Save to LocalStorage first for instant synchronously guaranteed backup
+  // 1. Save to Electron Desktop Persistent File/SQLite DB
+  if (window.electronAPI?.dbWrite) {
+    try {
+      await window.electronAPI.dbWrite(data);
+    } catch (e) {
+      console.warn('Electron Desktop DB write error:', e);
+    }
+  }
+
+  // 2. Save to LocalStorage
   try {
     localStorage.setItem(DATA_KEY, JSON.stringify(data));
   } catch (e) {
     console.warn('LocalStorage save error:', e);
   }
 
-  // Also save to IndexedDB
+  // 3. Save to IndexedDB
   return new Promise((resolve) => {
     if (!window.indexedDB) {
       resolve(true);

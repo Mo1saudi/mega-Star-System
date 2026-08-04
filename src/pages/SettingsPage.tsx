@@ -10,7 +10,8 @@ import { toast } from 'sonner';
 export const SettingsPage: React.FC = () => {
   const { 
     currentRole, setCurrentRole, resetToDefaultSeed, 
-    syncFromGoogleSheets, theme, toggleTheme 
+    syncFromGoogleSheets, theme, toggleTheme,
+    isGoogleConnected, googleUserEmail, handleGoogleSignIn, handleGoogleLogout
   } = useStore();
 
   const [spreadsheetUrl, setSpreadsheetUrl] = useState('https://docs.google.com/spreadsheets/d/1yJy9OeGP9uyHzzh35gUVYyXS8aRi41UM6Fg0LrWtsrU/edit?usp=sharing');
@@ -98,16 +99,43 @@ export const SettingsPage: React.FC = () => {
           
           {/* Google Sheets Sync Config */}
           <div className="p-6 rounded-3xl bg-white dark:bg-[#151c2d] border border-slate-200 dark:border-slate-800 space-y-4">
-            <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
-              <FileSpreadsheet className="w-6 h-6 text-emerald-500" />
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  إعدادات الربط المباشر بجدول بيانات Google Sheets
-                </h3>
-                <p className="text-xs text-slate-400">
-                  قاعدة البيانات المرجعية المحدثة تلقائياً عبر Google Sheets API
-                </p>
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                <FileSpreadsheet className="w-6 h-6 text-emerald-500" />
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    إعدادات الربط المباشر والمزامنة ثنائية الاتجاه (Two-Way Sync)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    تحديث شيت جوجل فوراً عند تعديل أي بيانات داخل التطبيق، وتجاهل الصفوف الفارغة
+                  </p>
+                </div>
               </div>
+
+              {/* Status Badge & OAuth Login */}
+              {isGoogleConnected ? (
+                <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-2xl">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                    مربوط كـ {googleUserEmail}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleGoogleLogout}
+                    className="text-[11px] text-rose-500 hover:underline mr-2"
+                  >
+                    فصل الحساب
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-sm transition-all"
+                >
+                  تسجيل الدخول بـ Google OAuth
+                </button>
+              )}
             </div>
 
             <form onSubmit={handleSaveSettings} className="space-y-4">
@@ -123,33 +151,15 @@ export const SettingsPage: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    معدل المزامنة التلقائية الخلفية
-                  </label>
-                  <select
-                    value={autoSyncMinutes}
-                    onChange={(e) => setAutoSyncMinutes(e.target.value)}
-                    className="w-full px-3 py-2.5 text-xs bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
-                  >
-                    <option value="5">كل 5 دقائق</option>
-                    <option value="15">كل 15 دقيقة</option>
-                    <option value="30">كل 30 دقيقة</option>
-                    <option value="manual">مزامنة يدوية فقط</option>
-                  </select>
-                </div>
-
-                <div className="flex items-end">
-                  <button
-                    type="button"
-                    onClick={() => syncFromGoogleSheets()}
-                    className="w-full py-2.5 text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                    <span>تشغيل مزامنة الآن من شيت جوجل</span>
-                  </button>
-                </div>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  type="button"
+                  onClick={() => syncFromGoogleSheets()}
+                  className="w-full py-2.5 text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>استيراد البيانات المبدئية من شيت جوجل (قراءة فقط)</span>
+                </button>
               </div>
 
               <div className="flex justify-end pt-2">

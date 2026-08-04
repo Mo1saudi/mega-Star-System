@@ -2,12 +2,26 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { 
   Pilgrim, Trip, Rooming, Staff, Transport, FamilyGroup, 
   AppSnapshot, FamilyValidationResult, PreflightValidationResult,
-  FinanceRecord, DocumentRecord, NotificationRecord, AccountingClosingRecord, UserRole
+  FinanceRecord, DocumentRecord, NotificationRecord, AccountingClosingRecord, UserRole, RoomType
 } from '../types';
 import { getLocalDatabaseStore, saveLocalDatabaseStore, getSeedSnapshot } from './desktop-store';
+import { initGoogleAuth, googleSignIn, getGoogleAccessToken, logoutGoogle } from './google-auth';
 import { toast } from 'sonner';
 
 interface StoreContextType {
+  // Google Sheets OAuth & Sync
+  isGoogleConnected: boolean;
+  googleUserEmail: string | null;
+  handleGoogleSignIn: () => Promise<void>;
+  handleGoogleLogout: () => Promise<void>;
+
+  // Currency Settings
+  currency: 'SAR' | 'EGP';
+  setCurrency: (currency: 'SAR' | 'EGP') => void;
+  exchangeRate: number; // 1 SAR = X EGP
+  setExchangeRate: (rate: number) => void;
+  formatCurrency: (amountInSar: number) => string;
+
   // Data
   pilgrims: Pilgrim[];
   trips: Trip[];
@@ -65,6 +79,8 @@ interface StoreContextType {
   addFamilyGroup: (group: Omit<FamilyGroup, 'id'>) => void;
   updateFamilyGroup: (id: string, updates: Partial<FamilyGroup>) => void;
   deleteFamilyGroup: (id: string) => void;
+  unlinkFamilyMemberAndRedistribute: (pilgrimId: string) => void;
+  deleteFamilyGroupAndRedistribute: (groupId: string) => void;
 
   // Finance Operations
   financeRecords: FinanceRecord[];
@@ -95,6 +111,7 @@ interface StoreContextType {
   validateFamilyGroups: () => FamilyValidationResult[];
   validatePreflight: (hotelName?: string) => PreflightValidationResult;
   syncFromGoogleSheets: () => Promise<void>;
+  appendPilgrimToSheet: (pilgrim: Pilgrim) => Promise<{ success: boolean; message: string }>;
   ocrExtractPassport: (base64Image: string, mimeType?: string) => Promise<any>;
   generateTripAiSummary: (tripData: any, pilgrimsCount: number) => Promise<string>;
   generateFinancialInsights: (financeData: any) => Promise<string>;
@@ -115,7 +132,36 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [activePage, setActivePage] = useState<string>('dashboard');
+  const [currency, setCurrency] = useState<'SAR' | 'EGP'>('SAR');
+  const [exchangeRate, setExchangeRate] = useState<number>(13.5); // 1 SAR = 13.5 EGP
   const [isLoaded, setIsLoaded] = useState(false);
+
+  // Google OAuth & Two-Way Sync State
+  const [isGoogleConnected, setIsGoogleConnected] = useState(false);
+  const [googleUserEmail, setGoogleUserEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = initGoogleAuth(
+      (user) => {
+        setIsGoogleConnected(true);
+        setGoogleUserEmail(user.email);
+      },
+      () => {
+        setIsGoogleConnected(false);
+        setGoogleUserEmail(null);
+      }
+    );
+    return () => { if (unsub) unsub(); };
+  }, []);
+
+  const formatCurrency = useCallback((amountInSar: number): string => {
+    if (isNaN(amountInSar) || amountInSar === undefined || amountInSar === null) return '0';
+    if (currency === 'EGP') {
+      const converted = amountInSar * exchangeRate;
+      return `${Math.round(converted).toLocaleString('ar-EG')} ج.م`;
+    }
+    return `${Math.round(amountInSar).toLocaleString('ar-EG')} ر.س`;
+  }, [currency, exchangeRate]);
 
   // Load saved local data on mount
   useEffect(() => {
@@ -199,62 +245,113 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [undo, redo]);
 
   // Pilgrim Operations
-  const addPilgrim = useCallback((data: Omit<Pilgrim, 'id'>) => {
+
+  // Single Pilgrim Google Sheets Append Function
+  const appendPilgrimToSheet = useCallback(async (pilgrim: Pilgrim): Promise<{ success: boolean; message: string }> => {
+    const token = getGoogleAccessToken();
+    try {
+      const res = await fetch('/api/sheets/append-pilgrim', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          pilgrim,
+          accessToken: token
+        })
+      });
+      const data = await res.json();
+      return data;
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'تعذر الاتصال بـ Google Sheets'
+      };
+    }
+  }, []);
+
+  const addPilgrim = useCallback(async (data: Omit<Pilgrim, 'id'>) => {
     const newPilgrim: Pilgrim = {
       ...data,
       id: `PIL-${Date.now().toString().slice(-6)}`
     };
+    const nextList = [newPilgrim, ...snapshot.pilgrims];
+    
+    // Save locally first to guarantee no data loss
     commitChange({
       ...snapshot,
-      pilgrims: [newPilgrim, ...snapshot.pilgrims]
+      pilgrims: nextList
     });
-    toast.success(`تم إضافة المعتمر: ${data.name}`);
-  }, [snapshot, commitChange]);
+
+    const loadingToast = toast.loading(`جاري إضافة المعتمر ومزامنة البيانات مع Google Sheets (ورقة الرئيسية)...`);
+
+    try {
+      const syncResult = await appendPilgrimToSheet(newPilgrim);
+      toast.dismiss(loadingToast);
+
+      if (syncResult && syncResult.success) {
+        toast.success(`تم حفظ المعتمر محلياً ومزامنة بياناته بنجاح مع Google Sheets (ورقة الرئيسية) 🟢`, { duration: 4000 });
+      } else {
+        toast.error(`تم حفظ المعتمر محلياً بنجاح، ولكن تعذرت المزامنة مع Google Sheets 🔴 (${syncResult?.message || 'فشلت المزامنة'})`, { duration: 5000 });
+      }
+    } catch (e) {
+      toast.dismiss(loadingToast);
+      toast.error(`تم حفظ المعتمر محلياً بنجاح، ولكن تعذرت المزامنة المباشرة مع Google Sheets 🔴`, { duration: 5000 });
+    }
+  }, [snapshot, commitChange, appendPilgrimToSheet]);
 
   const updatePilgrim = useCallback((id: string, updates: Partial<Pilgrim>) => {
+    const nextList = snapshot.pilgrims.map(p => p.id === id ? { ...p, ...updates } : p);
     commitChange({
       ...snapshot,
-      pilgrims: snapshot.pilgrims.map(p => p.id === id ? { ...p, ...updates } : p)
+      pilgrims: nextList
     });
     toast.success('تم تحديث بيانات المعتمر');
   }, [snapshot, commitChange]);
 
   const deletePilgrim = useCallback((id: string) => {
     const pilgrim = snapshot.pilgrims.find(p => p.id === id);
+    const nextList = snapshot.pilgrims.filter(p => p.id !== id);
     commitChange({
       ...snapshot,
-      pilgrims: snapshot.pilgrims.filter(p => p.id !== id)
+      pilgrims: nextList
     });
     toast.success(`تم حذف المعتمر ${pilgrim?.name || ''}`);
   }, [snapshot, commitChange]);
 
   const bulkUpdatePilgrims = useCallback((ids: string[], updates: Partial<Pilgrim>) => {
+    const nextList = snapshot.pilgrims.map(p => ids.includes(p.id) ? { ...p, ...updates } : p);
     commitChange({
       ...snapshot,
-      pilgrims: snapshot.pilgrims.map(p => ids.includes(p.id) ? { ...p, ...updates } : p)
+      pilgrims: nextList
     });
     toast.success(`تم التعديل الجماعي لـ ${ids.length} معتمر`);
   }, [snapshot, commitChange]);
 
   const bulkDeletePilgrims = useCallback((ids: string[]) => {
+    const nextList = snapshot.pilgrims.filter(p => !ids.includes(p.id));
     commitChange({
       ...snapshot,
-      pilgrims: snapshot.pilgrims.filter(p => !ids.includes(p.id))
+      pilgrims: nextList
     });
     toast.success(`تم حذف ${ids.length} معتمر بنجاح`);
   }, [snapshot, commitChange]);
 
   const importPilgrims = useCallback((newPilgrims: Pilgrim[], mode: 'append' | 'replace') => {
+    let nextList: Pilgrim[];
     if (mode === 'replace') {
+      nextList = newPilgrims;
       commitChange({
         ...snapshot,
         pilgrims: newPilgrims
       });
       toast.success(`تم استبدال سجلات المعتمرين بـ ${newPilgrims.length} معتمر جديد`);
     } else {
+      nextList = [...newPilgrims, ...snapshot.pilgrims];
       commitChange({
         ...snapshot,
-        pilgrims: [...newPilgrims, ...snapshot.pilgrims]
+        pilgrims: nextList
       });
       toast.success(`تم إضافة ${newPilgrims.length} معتمر جديد إلى السجل الحالي`);
     }
@@ -419,7 +516,195 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     toast.success('تم حذف الرابط العائلي');
   }, [snapshot, commitChange]);
 
-  // Smart Auto-Rooming Engine (Clusters family links, marital pairs, and merged notes first, then singles)
+  // Unlink a pilgrim from their family link and automatically redistribute them into a suitable same-gender room or new room
+  const unlinkFamilyMemberAndRedistribute = useCallback((pilgrimId: string) => {
+    const targetPilgrim = snapshot.pilgrims.find(p => p.id === pilgrimId);
+    if (!targetPilgrim) return;
+
+    // 1. Remove pilgrim from familyGroups
+    const nextFamilyGroups = snapshot.familyGroups
+      .map(fg => ({
+        ...fg,
+        pilgrim_ids: fg.pilgrim_ids.filter(id => id !== pilgrimId)
+      }))
+      .filter(fg => fg.pilgrim_ids.length > 0);
+
+    // 2. Identify the hotel and current room members
+    const hotelPilgrims = snapshot.pilgrims.filter(p => 
+      (targetPilgrim.makkah_hotel && p.makkah_hotel === targetPilgrim.makkah_hotel) ||
+      (targetPilgrim.madinah_hotel && p.madinah_hotel === targetPilgrim.madinah_hotel)
+    );
+
+    const oldRoomNo = targetPilgrim.room_number;
+    let newRoomNo = '';
+    let newRoomTypeStr: RoomType = 'فردي';
+
+    // 3. Find existing room that matches gender and has space
+    if (hotelPilgrims.length > 0) {
+      const roomMap = new Map<string, Pilgrim[]>();
+      hotelPilgrims.forEach(p => {
+        if (p.room_number && p.id !== pilgrimId) {
+          if (!roomMap.has(p.room_number)) roomMap.set(p.room_number, []);
+          roomMap.get(p.room_number)!.push(p);
+        }
+      });
+
+      let foundRoomNo: string | null = null;
+      let foundRoomMembers: Pilgrim[] = [];
+
+      for (const [rNo, members] of roomMap.entries()) {
+        const isSameGender = members.every(m => m.gender === targetPilgrim.gender);
+        const hasSpace = members.length < 4;
+        const isOldRoom = rNo === oldRoomNo;
+        const oldRoomHasOppositeGender = isOldRoom && members.some(m => m.gender !== targetPilgrim.gender);
+
+        if (isSameGender && hasSpace && !oldRoomHasOppositeGender) {
+          foundRoomNo = rNo;
+          foundRoomMembers = members;
+          break;
+        }
+      }
+
+      if (foundRoomNo) {
+        newRoomNo = foundRoomNo;
+        const newTotalCount = foundRoomMembers.length + 1;
+        newRoomTypeStr = newTotalCount === 1 ? 'فردي' : newTotalCount === 2 ? 'ثنائي' : newTotalCount === 3 ? 'ثلاثي' : 'رباعي';
+      } else {
+        const existingNumbers = Array.from(roomMap.keys())
+          .map(rn => parseInt(rn.replace(/\D/g, ''), 10))
+          .filter(num => !isNaN(num) && num > 0);
+        
+        const maxNo = existingNumbers.length > 0 ? Math.max(...existingNumbers) : 100;
+        newRoomNo = (maxNo + 1).toString();
+        newRoomTypeStr = 'فردي';
+      }
+    } else {
+      newRoomNo = oldRoomNo || '101';
+      newRoomTypeStr = 'فردي';
+    }
+
+    // 4. Update pilgrims state
+    const nextPilgrims = snapshot.pilgrims.map(p => {
+      if (p.id === pilgrimId) {
+        return {
+          ...p,
+          family_group_link: '',
+          room_number: newRoomNo,
+          room_type: newRoomTypeStr
+        };
+      }
+      if (oldRoomNo && p.room_number === oldRoomNo && p.id !== pilgrimId) {
+        const remainingInOldRoom = snapshot.pilgrims.filter(op => op.room_number === oldRoomNo && op.id !== pilgrimId);
+        const count = remainingInOldRoom.length;
+        const updatedType: RoomType = count === 1 ? 'فردي' : count === 2 ? 'ثنائي' : count === 3 ? 'ثلاثي' : 'رباعي';
+        return {
+          ...p,
+          room_type: updatedType
+        };
+      }
+      if (newRoomNo && p.room_number === newRoomNo && p.id !== pilgrimId) {
+        const membersInNewRoom = snapshot.pilgrims.filter(np => np.room_number === newRoomNo || np.id === pilgrimId);
+        const count = membersInNewRoom.length;
+        const updatedType: RoomType = count === 1 ? 'فردي' : count === 2 ? 'ثنائي' : count === 3 ? 'ثلاثي' : 'رباعي';
+        return {
+          ...p,
+          room_type: updatedType
+        };
+      }
+      return p;
+    });
+
+    commitChange({
+      ...snapshot,
+      familyGroups: nextFamilyGroups,
+      pilgrims: nextPilgrims
+    });
+
+    toast.success(
+      `تم إزالة الرابط العائلي للمعتمر (${targetPilgrim.name}) وتوزيعه تلقائياً في الغرفة (${newRoomNo}) - (${targetPilgrim.gender === 'ذكر' ? 'قسم الرجال' : 'قسم السيدات'})`
+    );
+  }, [snapshot, commitChange]);
+
+  // Delete family group and redistribute all members into separate/same-gender rooms
+  const deleteFamilyGroupAndRedistribute = useCallback((groupId: string) => {
+    const group = snapshot.familyGroups.find(fg => fg.id === groupId);
+    if (!group) return;
+
+    const nextFamilyGroups = snapshot.familyGroups.filter(fg => fg.id !== groupId);
+    let currentPilgrims = [...snapshot.pilgrims];
+
+    group.pilgrim_ids.forEach(pId => {
+      const p = currentPilgrims.find(x => x.id === pId);
+      if (!p) return;
+
+      const hotelPilgrims = currentPilgrims.filter(hp => 
+        (p.makkah_hotel && hp.makkah_hotel === p.makkah_hotel) ||
+        (p.madinah_hotel && hp.madinah_hotel === p.madinah_hotel)
+      );
+
+      const oldRoomNo = p.room_number;
+      let newRoomNo = '';
+      let newRoomTypeStr: RoomType = 'فردي';
+
+      const roomMap = new Map<string, Pilgrim[]>();
+      hotelPilgrims.forEach(hp => {
+        if (hp.room_number && hp.id !== pId) {
+          if (!roomMap.has(hp.room_number)) roomMap.set(hp.room_number, []);
+          roomMap.get(hp.room_number)!.push(hp);
+        }
+      });
+
+      let foundRoomNo: string | null = null;
+      let foundRoomMembers: Pilgrim[] = [];
+
+      for (const [rNo, members] of roomMap.entries()) {
+        const isSameGender = members.every(m => m.gender === p.gender);
+        const hasSpace = members.length < 4;
+        const oldRoomHasOppositeGender = rNo === oldRoomNo && members.some(m => m.gender !== p.gender);
+
+        if (isSameGender && hasSpace && !oldRoomHasOppositeGender) {
+          foundRoomNo = rNo;
+          foundRoomMembers = members;
+          break;
+        }
+      }
+
+      if (foundRoomNo) {
+        newRoomNo = foundRoomNo;
+        const count = foundRoomMembers.length + 1;
+        newRoomTypeStr = count === 1 ? 'فردي' : count === 2 ? 'ثنائي' : count === 3 ? 'ثلاثي' : 'رباعي';
+      } else {
+        const existingNumbers = Array.from(roomMap.keys())
+          .map(rn => parseInt(rn.replace(/\D/g, ''), 10))
+          .filter(num => !isNaN(num) && num > 0);
+        const maxNo = existingNumbers.length > 0 ? Math.max(...existingNumbers) : 100;
+        newRoomNo = (maxNo + 1).toString();
+        newRoomTypeStr = 'فردي';
+      }
+
+      currentPilgrims = currentPilgrims.map(item => {
+        if (item.id === pId) {
+          return {
+            ...item,
+            family_group_link: '',
+            room_number: newRoomNo,
+            room_type: newRoomTypeStr
+          };
+        }
+        return item;
+      });
+    });
+
+    commitChange({
+      ...snapshot,
+      familyGroups: nextFamilyGroups,
+      pilgrims: currentPilgrims
+    });
+
+    toast.success(`تم حذف الرابط العائلي (${group.group_name}) وتوزيع جميع أفراده تلقائياً في غرف جديدة حسب الجنس`);
+  }, [snapshot, commitChange]);
+
+  // Smart Auto-Rooming Engine (Clusters family links, marital pairs, merged notes, and room specs from sheet)
   const autoRooming = useCallback((hotelName: string, city: 'مكة' | 'المدينة') => {
     const hotelKey = city === 'مكة' ? 'makkah_hotel' : 'madinah_hotel';
     const hotelPilgrims = snapshot.pilgrims.filter(p => p[hotelKey] === hotelName);
@@ -433,18 +718,28 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const updatedPilgrimsMap = new Map<string, Pilgrim>();
     const assignedIds = new Set<string>();
 
-    // 1. Group by Family Groups & Relational Notes (أزواج / إخوة / عائلات / أصحاب)
+    // 1. Cluster by Family Link & Merged Cell Notes (أزواج / إخوة / عائلات / ملاحظات الشيت المدمجة)
     const familyClusterMap = new Map<string, Pilgrim[]>();
 
     hotelPilgrims.forEach(p => {
-      const famKey = p.family_group_link || (p.notes && /زوج|زوجة|زوجين|أزواج|اخوات|إخوة|اسره|أسرة|عائلة|مع بعض|أصحاب|اصحاب/i.test(p.notes) ? p.notes : null);
+      // Determine cluster key from family link, merged notes, or room spec notes
+      let famKey = p.family_group_link || null;
+
+      if (!famKey && p.notes) {
+        const cleanNotes = p.notes.trim();
+        // Check for relational keywords in merged cell notes
+        if (/زوج|زوجة|زوجين|أزواج|اخوات|إخوة|اخوان|بنات|أبناء|اسره|أسرة|عائلة|عائله|مع بعض|أصحاب|اصحاب/i.test(cleanNotes)) {
+          famKey = cleanNotes;
+        }
+      }
+
       if (famKey) {
         if (!familyClusterMap.has(famKey)) familyClusterMap.set(famKey, []);
         familyClusterMap.get(famKey)!.push(p);
       }
     });
 
-    // Assign Family Clusters & Couples to dedicated rooms
+    // Assign Family Clusters & Couples to dedicated rooms according to room spec or size
     familyClusterMap.forEach((members) => {
       if (members.length > 0) {
         const unassignedMembers = members.filter(m => !assignedIds.has(m.id));
@@ -452,9 +747,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         let index = 0;
         while (index < unassignedMembers.length) {
-          const roomPilgrims = unassignedMembers.slice(index, index + 4);
+          const remainingCount = unassignedMembers.length - index;
+
+          // Check if members specify a target room spec ('ثنائي', 'ثلاثي', 'رباعي', 'فردي')
+          const firstSpec = unassignedMembers[index].room_spec || unassignedMembers[index].room_type;
+          let targetCapacity = 4; // Default Quad
+
+          if (firstSpec === 'ثنائي' || (remainingCount === 2 && /زوج|زوجة|زوجين|أزواج/i.test(unassignedMembers[index].notes || ''))) {
+            targetCapacity = 2;
+          } else if (firstSpec === 'ثلاثي' || remainingCount === 3) {
+            targetCapacity = 3;
+          } else if (firstSpec === 'فردي' || remainingCount === 1) {
+            targetCapacity = 1;
+          } else {
+            targetCapacity = Math.min(4, remainingCount);
+          }
+
+          const roomPilgrims = unassignedMembers.slice(index, index + targetCapacity);
           const currentRoomNumber = `${roomNumberCounter}`;
-          const roomTypeStr: RoomType = roomPilgrims.length === 2 ? 'ثنائي' : roomPilgrims.length === 3 ? 'ثلاثي' : 'رباعي';
+          const roomTypeStr: RoomType = roomPilgrims.length === 1 ? 'فردي' : roomPilgrims.length === 2 ? 'ثنائي' : roomPilgrims.length === 3 ? 'ثلاثي' : 'رباعي';
 
           roomPilgrims.forEach(p => {
             assignedIds.add(p.id);
@@ -465,13 +776,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             });
           });
 
-          index += 4;
+          index += roomPilgrims.length;
           roomNumberCounter++;
         }
       }
     });
 
-    // 2. Separate remaining unassigned males and females
+    // 2. Separate remaining unassigned males and females (Strict Non-Mahram separation for singles)
     const unassignedMales = hotelPilgrims.filter(p => !assignedIds.has(p.id) && p.gender === 'ذكر');
     const unassignedFemales = hotelPilgrims.filter(p => !assignedIds.has(p.id) && p.gender === 'أنثى');
 
@@ -479,15 +790,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       let index = 0;
       while (index < pilgrimList.length) {
         const remaining = pilgrimList.length - index;
-        let roomCap = 4; // Priority: Quad (4)
-        if (remaining === 3) roomCap = 3;
-        else if (remaining === 2) roomCap = 2;
-        else if (remaining === 1 && index > 0) roomCap = 1;
+
+        // Check preferred room_spec for current pilgrim
+        const preferredSpec = pilgrimList[index].room_spec;
+        let roomCap = 4; // Default Quad
+        if (preferredSpec === 'ثنائي') roomCap = 2;
+        else if (preferredSpec === 'ثلاثي') roomCap = 3;
+        else if (preferredSpec === 'فردي') roomCap = 1;
+        else {
+          if (remaining === 3) roomCap = 3;
+          else if (remaining === 2) roomCap = 2;
+          else if (remaining === 1 && index > 0) roomCap = 1;
+          else roomCap = Math.min(4, remaining);
+        }
 
         const currentRoomNumber = `${roomNumberCounter}`;
         const roomPilgrims = pilgrimList.slice(index, index + roomCap);
 
-        let roomTypeStr: RoomType = roomCap >= 4 ? 'رباعي' : roomCap === 3 ? 'ثلاثي' : 'ثنائي';
+        let roomTypeStr: RoomType = roomPilgrims.length === 1 ? 'فردي' : roomPilgrims.length === 2 ? 'ثنائي' : roomPilgrims.length === 3 ? 'ثلاثي' : 'رباعي';
 
         roomPilgrims.forEach(p => {
           assignedIds.add(p.id);
@@ -498,7 +818,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           });
         });
 
-        index += roomCap;
+        index += roomPilgrims.length;
         roomNumberCounter++;
       }
     };
@@ -513,7 +833,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       pilgrims: nextPilgrims
     });
 
-    toast.success(`تم التسكين الذكي لـ ${hotelPilgrims.length} معتمر بـ ${hotelName} (تجميع العائلات والأزواج أولاً بناءً على الشيت، ثم الأفراد)`);
+    toast.success(`تم التسكين الذكي لـ ${hotelPilgrims.length} معتمر بـ ${hotelName} (تجميع العائلات والأزواج بناءً على ملاحظات الشيت وروابط الأسر)`);
   }, [snapshot, commitChange]);
 
   // Family Validation Engine (detecting gender conflicts, unlinked marital pairs, non-mahram mixes)
@@ -635,9 +955,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Server Function: Google Sheet Sync
   const syncFromGoogleSheets = useCallback(async () => {
-    const loadingToast = toast.loading('جاري المزامنة وقراءة كافة أوراق وبيانات جوجل شيت...');
+    const loadingToast = toast.loading('جاري المزامنة وقراءة شيت جوجل (وتجاهل الصفوف الفارغة)...');
     try {
-      const res = await fetch('/api/sync-sheet');
+      const token = getGoogleAccessToken();
+      const res = await fetch('/api/sync-sheet', {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
       const data = await res.json();
       toast.dismiss(loadingToast);
 
@@ -655,7 +978,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             {
               id: `NOTIF-${Date.now()}`,
               title: 'تمت المزامنة الكاملة من Google Sheets',
-              message: data.message || `تم استيراد ${data.count || 0} معتمر، ووحدات السكن، والحسابات، والمشرفين.`,
+              message: data.message || `تم استيراد ${data.count || 0} معتمر، وتجاهل الصفوف الفارغة.`,
               timestamp: new Date().toLocaleTimeString('ar-SA'),
               read: false,
               type: 'success'
@@ -664,7 +987,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ]
         };
         commitChange(nextSnapshot);
-        toast.success(data.message || 'تمت المزامنة بنجاح من جوجل شيت');
+        toast.success(data.message || 'تمت المزامنة بنجاح من جوجل شيت (تم استبعاد الصفوف الفارغة)');
       } else {
         toast.error(data.message || 'تعذر جلب البيانات من شيت جوجل');
       }
@@ -673,6 +996,27 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       toast.success('تم مزامنة البيانات وتحديث سجل المعتمرين بنجاح من شيت جوجل (موسم 1448 هـ)');
     }
   }, [snapshot, commitChange]);
+
+  const handleGoogleSignIn = useCallback(async () => {
+    try {
+      const res = await googleSignIn();
+      if (res) {
+        setIsGoogleConnected(true);
+        setGoogleUserEmail(res.user.email);
+        toast.success(`تم الربط المباشر مع حساب جوجل (${res.user.email})`);
+        syncFromGoogleSheets();
+      }
+    } catch (err: any) {
+      toast.error('خطأ في تسجيل الدخول بـ Google OAuth: ' + (err.message || ''));
+    }
+  }, [syncFromGoogleSheets]);
+
+  const handleGoogleLogout = useCallback(async () => {
+    await logoutGoogle();
+    setIsGoogleConnected(false);
+    setGoogleUserEmail(null);
+    toast.info('تم إلغاء ربط حساب جوجل');
+  }, []);
 
   // Server Function: OCR Passport
   const ocrExtractPassport = useCallback(async (base64Image: string, mimeType: string = 'image/jpeg') => {
@@ -841,6 +1185,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [commitChange]);
 
   const value = useMemo(() => ({
+    // Google OAuth & Sync
+    isGoogleConnected,
+    googleUserEmail,
+    handleGoogleSignIn,
+    handleGoogleLogout,
+
+    currency,
+    setCurrency,
+    exchangeRate,
+    setExchangeRate,
+    formatCurrency,
+
     pilgrims: snapshot.pilgrims,
     trips: snapshot.trips,
     roomings: snapshot.roomings,
@@ -889,6 +1245,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     addFamilyGroup,
     updateFamilyGroup,
     deleteFamilyGroup,
+    unlinkFamilyMemberAndRedistribute,
+    deleteFamilyGroupAndRedistribute,
 
     financeRecords: snapshot.financeRecords || [],
     addFinanceRecord,
@@ -913,19 +1271,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     validateFamilyGroups,
     validatePreflight,
     syncFromGoogleSheets,
+    appendPilgrimToSheet,
     ocrExtractPassport,
     generateTripAiSummary,
     generateFinancialInsights,
     generateAiErrorDetection,
     resetToDefaultSeed
   }), [
+    isGoogleConnected, googleUserEmail, handleGoogleSignIn, handleGoogleLogout, appendPilgrimToSheet,
+    currency, exchangeRate, formatCurrency,
     snapshot, selectedHotelFilter, searchQuery, theme, activePage,
     history.length, future.length, undo, redo,
     addPilgrim, updatePilgrim, deletePilgrim, bulkUpdatePilgrims, bulkDeletePilgrims, importPilgrims,
     addTrip, updateTrip, deleteTrip, addRooming, updateRooming, deleteRooming,
     addStaff, updateStaff, deleteStaff, toggleStaffStatus,
     addTransport, updateTransport, deleteTransport,
-    addFamilyGroup, updateFamilyGroup, deleteFamilyGroup,
+    addFamilyGroup, updateFamilyGroup, deleteFamilyGroup, unlinkFamilyMemberAndRedistribute, deleteFamilyGroupAndRedistribute,
     addFinanceRecord, updateFinanceRecord, deleteFinanceRecord,
     addDocument, deleteDocument, markNotificationRead, addNotification,
     addAccountingClosing, setCurrentRole,

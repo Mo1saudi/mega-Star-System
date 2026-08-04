@@ -1,17 +1,19 @@
 {
-  "name": "react-example",
+  "name": "megastar-umrah-app",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "main": "dist/server.cjs",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "rm -rf dist server.js release dist-electron",
     "lint": "tsc --noEmit",
     "electron:dev": "tsx server.ts",
-    "electron:build": "npm run build && electron-builder"
+    "electron:compile": "tsc -p tsconfig.electron.json",
+    "electron:build": "tsc -p tsconfig.electron.json && vite build && electron-builder"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -22,6 +24,7 @@
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "firebase": "^12.17.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",

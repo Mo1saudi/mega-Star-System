@@ -4,14 +4,18 @@ import { Lock, Unlock, CheckCircle2, DollarSign, Calendar, FileCheck, Shield, Pl
 import { toast } from 'sonner';
 
 export const AccountingClosingPage: React.FC = () => {
-  const { closings, addAccountingClosing, financeRecords } = useStore();
+  const { closings, addAccountingClosing, financeRecords, formatCurrency } = useStore();
   const [isOpenModal, setIsOpenModal] = useState(false);
   const [periodName, setPeriodName] = useState('قفلة شهر أغسطس 2026');
   const [notes, setNotes] = useState('');
 
-  // Calculate stats
-  const totalRevenue = financeRecords.filter(r => r.type === 'revenue').reduce((s, r) => s + r.amount, 0);
-  const totalExpenses = financeRecords.filter(r => r.type === 'expense').reduce((s, r) => s + r.amount, 0);
+  // Calculate stats (excluding withdrawn / cancelled records)
+  const totalRevenue = financeRecords
+    .filter(r => r.type === 'revenue' && !r.is_withdrawn && r.category !== 'سحب وإلغاء')
+    .reduce((s, r) => s + r.amount, 0);
+  const totalExpenses = financeRecords
+    .filter(r => r.type === 'expense' && !r.is_withdrawn)
+    .reduce((s, r) => s + r.amount, 0);
   const netProfit = totalRevenue - totalExpenses;
 
   const handleClosePeriodSubmit = (e: React.FormEvent) => {
@@ -90,21 +94,21 @@ export const AccountingClosingPage: React.FC = () => {
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50">
                 <span className="text-xs text-slate-500">إجمالي الإيرادات المقفلة</span>
                 <div className="text-lg font-extrabold text-emerald-600 dark:text-emerald-400 mt-1">
-                  {closing.total_revenue.toLocaleString()} ر.س
+                  {formatCurrency(closing.total_revenue)}
                 </div>
               </div>
 
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50">
                 <span className="text-xs text-slate-500">إجمالي المصروفات المقفلة</span>
                 <div className="text-lg font-extrabold text-rose-600 dark:text-rose-400 mt-1">
-                  {closing.total_expenses.toLocaleString()} ر.س
+                  {formatCurrency(closing.total_expenses)}
                 </div>
               </div>
 
               <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
                 <span className="text-xs text-amber-700 dark:text-amber-400 font-bold">صافي الأرباح المرحّلة</span>
                 <div className="text-lg font-extrabold text-slate-900 dark:text-white mt-1">
-                  {closing.net_profit.toLocaleString()} ر.س
+                  {formatCurrency(closing.net_profit)}
                 </div>
               </div>
             </div>

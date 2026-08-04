@@ -2,7 +2,7 @@ export type Gender = 'ذكر' | 'أنثى';
 
 export type VisaStatus = 'مكتملة' | 'قيد الإجراء' | 'لم تبدأ';
 export type BarcodeStatus = 'مرفوع' | 'غير مرفوع' | 'مكتمل';
-export type RoomType = 'ثنائي' | 'ثلاثي' | 'رباعي';
+export type RoomType = 'ثنائي' | 'ثلاثي' | 'رباعي' | 'فردي';
 
 export interface Pilgrim {
   id: string;
@@ -22,6 +22,9 @@ export interface Pilgrim {
   notes?: string;
   needs_bed: boolean;
   room_number?: string;
+  
+  is_withdrawn?: boolean;
+  withdrawal_status?: string;
   
   // Sheet-specific properties
   program?: string;
@@ -126,6 +129,7 @@ export interface FinanceRecord {
   invoice_number?: string;
   party_name?: string; // Client or Supplier name
   payment_method: 'تحويل بنكي' | 'نقداً' | 'شيك' | 'بطاقة سداد';
+  is_withdrawn?: boolean;
 }
 
 export interface DocumentRecord {
@@ -176,3 +180,17 @@ export interface AppSnapshot {
   closings: AccountingClosingRecord[];
   currentRole?: UserRole;
 }
+
+declare global {
+  interface Window {
+    electronAPI?: {
+      dbRead: () => Promise<AppSnapshot | null>;
+      dbWrite: (snapshot: AppSnapshot) => Promise<boolean>;
+      showNotification: (title: string, body: string) => Promise<void>;
+      selectFile: (options?: any) => Promise<string | null>;
+      getAppDataPath: () => Promise<Record<string, string>>;
+      isDesktop?: boolean;
+    };
+  }
+}
+
