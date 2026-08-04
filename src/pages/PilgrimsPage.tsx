@@ -57,6 +57,12 @@ export const PilgrimsPage: React.FC = () => {
         p.name.toLowerCase().includes(q) || 
         p.passport_number.toLowerCase().includes(q) ||
         p.agent_main.toLowerCase().includes(q) ||
+        (p.agent_sub && p.agent_sub.toLowerCase().includes(q)) ||
+        (p.program && p.program.toLowerCase().includes(q)) ||
+        (p.visa_type && p.visa_type.toLowerCase().includes(q)) ||
+        (p.group_number && p.group_number.toLowerCase().includes(q)) ||
+        (p.trip_number && p.trip_number.toLowerCase().includes(q)) ||
+        (p.notes && p.notes.toLowerCase().includes(q)) ||
         (p.room_number && p.room_number.includes(q));
       
       return matchesHotel && matchesQuery;
@@ -246,26 +252,38 @@ export const PilgrimsPage: React.FC = () => {
     e.target.value = '';
   };
 
-  // Export to Excel
+  // Export to Excel with all 21 Google Sheet columns
   const exportToExcel = () => {
-    const exportData = filteredPilgrims.map(p => ({
-      'الاسم الكامل': p.name,
+    const exportData = filteredPilgrims.map((p, idx) => ({
+      'م': idx + 1,
+      'الاسم': p.name,
+      'المندوب': p.agent_main,
+      'المندوب الفرعى': p.agent_sub || '',
       'رقم الجواز': p.passport_number,
-      'الجنس': p.gender,
-      'الوكيل الرئيسي': p.agent_main,
-      'فندق مكة': p.makkah_hotel,
-      'فندق المدينة': p.madinah_hotel,
-      'نوع الغرفة': p.room_type,
-      'رقم الغرفة': p.room_number || 'غير مسكن',
-      'حالة التأشيرة': p.visa_status,
-      'تصريح السفر': p.travel_permit_required ? 'مطلوب' : 'غير مطلوب'
+      'تصاريح': p.travel_permit_required ? 'مطلوب' : 'غير مطلوب',
+      'غرف خاصه': p.room_spec || p.room_type,
+      'النوع': p.gender,
+      'البرنامج': p.program || 'برنامج عمره',
+      'نوع التأشيرة': p.visa_type || p.visa_status,
+      'الباركود': p.barcode_status,
+      'ملاحظات': p.notes || '',
+      'فندق مكه': p.makkah_hotel,
+      'فندق المدينه': p.madinah_hotel,
+      'اسم الرحله': p.trip_id,
+      'رقم المجموعه': p.group_number || '',
+      'رقم الرحله': p.trip_number || '',
+      'ساعه الوصول': p.arrival_time || '',
+      'رحله العوده': p.return_trip || '',
+      'تاريخ العوده': p.return_date || '',
+      'ساعه السفر': p.travel_time || '',
+      'ساعة الاقلاع': p.departure_time || ''
     }));
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'سجل المعتمرين');
-    XLSX.writeFile(wb, `سجل_المعتمرين_ميجا_ستار_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    toast.success('تم تصدير سجل المعتمرين إلى إكسل بنجاح');
+    XLSX.utils.book_append_sheet(wb, ws, 'سجل المعتمرين الشامل');
+    XLSX.writeFile(wb, `بيانات_المعتمرين_المصدرة_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast.success('تم تصدير سجل المعتمرين بجميع أعمدة الشيت (21 عمود) بنجاح');
   };
 
   return (
@@ -593,28 +611,73 @@ export const PilgrimsPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">المندوب (الوكيل الرئيسي)</label>
+                  <input
+                    type="text"
+                    value={formData.agent_main || ''}
+                    onChange={e => setFormData({ ...formData, agent_main: e.target.value })}
+                    placeholder="اسم المندوب الرئيسي"
+                    className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">المندوب الفرعي</label>
+                  <input
+                    type="text"
+                    value={formData.agent_sub || ''}
+                    onChange={e => setFormData({ ...formData, agent_sub: e.target.value })}
+                    placeholder="اسم الفرع أو المندوب المساعد"
+                    className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">البرنامج</label>
+                  <input
+                    type="text"
+                    value={formData.program || 'برنامج عمره'}
+                    onChange={e => setFormData({ ...formData, program: e.target.value })}
+                    placeholder="مثال: برنامج عمره / تأشيرة فقط"
+                    className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">نوع التأشيرة / الكفيل</label>
+                  <input
+                    type="text"
+                    value={formData.visa_type || ''}
+                    onChange={e => setFormData({ ...formData, visa_type: e.target.value })}
+                    placeholder="اسم جهة الاصدار أو الكفيل"
+                    className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">فندق مكة المكرمة</label>
-                  <select
+                  <input
+                    type="text"
                     value={formData.makkah_hotel || ''}
                     onChange={e => setFormData({ ...formData, makkah_hotel: e.target.value })}
+                    placeholder="اسم فندق مكة"
                     className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
-                  >
-                    <option value="فندق أنجم مكة">فندق أنجم مكة</option>
-                    <option value="فندق أبراج القصواء مكة">فندق أبراج القصواء</option>
-                    <option value="فندق بولمان زمزم مكة">فندق بولمان زمزم</option>
-                  </select>
+                  />
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">فندق المدينة المنورة</label>
-                  <select
+                  <input
+                    type="text"
                     value={formData.madinah_hotel || ''}
                     onChange={e => setFormData({ ...formData, madinah_hotel: e.target.value })}
+                    placeholder="اسم فندق المدينة"
                     className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
-                  >
-                    <option value="فندق دار الهجرة المدينة">فندق دار الهجرة</option>
-                    <option value="فندق الفيروز الماسي المدينة">فندق الفيروز الماسي</option>
-                  </select>
+                  />
                 </div>
               </div>
 
@@ -633,17 +696,50 @@ export const PilgrimsPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">حالة التأشيرة</label>
-                  <select
-                    value={formData.visa_status || 'مكتملة'}
-                    onChange={e => setFormData({ ...formData, visa_status: e.target.value as any })}
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">غرف خاصة / مواصفات</label>
+                  <input
+                    type="text"
+                    value={formData.room_spec || ''}
+                    onChange={e => setFormData({ ...formData, room_spec: e.target.value })}
+                    placeholder="مثال: ثنائي خاص / جناح"
                     className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
-                  >
-                    <option value="مكتملة">مكتملة</option>
-                    <option value="قيد الإجراء">قيد الإجراء</option>
-                    <option value="لم تبدأ">لم تبدأ</option>
-                  </select>
+                  />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">رقم المجموعة</label>
+                  <input
+                    type="text"
+                    value={formData.group_number || ''}
+                    onChange={e => setFormData({ ...formData, group_number: e.target.value })}
+                    placeholder="مثال: 101"
+                    className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">رقم الرحلة</label>
+                  <input
+                    type="text"
+                    value={formData.trip_number || ''}
+                    onChange={e => setFormData({ ...formData, trip_number: e.target.value })}
+                    placeholder="مثال: 2525147"
+                    className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">ملاحظات والتصاريح</label>
+                <textarea
+                  rows={2}
+                  value={formData.notes || ''}
+                  onChange={e => setFormData({ ...formData, notes: e.target.value })}
+                  placeholder="أي ملاحظات إضافية عن التصاريح أو الرغبات الخاصة..."
+                  className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
+                />
               </div>
 
               <div className="flex items-center gap-2 pt-2">

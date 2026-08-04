@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
 import { useStore } from '../lib/store';
-import { Search, Undo2, Redo2, Hotel, Moon, Sun, RefreshCw, Download, Monitor } from 'lucide-react';
+import { Search, Undo2, Redo2, Hotel, Moon, Sun, RefreshCw, Download, Monitor, Shield, Cloud } from 'lucide-react';
 import { ExeDownloadModal } from './ExeDownloadModal';
+import { AuthModal } from './AuthModal';
+import { HostingGuideModal } from './HostingGuideModal';
 
 export const Topbar: React.FC = () => {
   const [isExeModalOpen, setIsExeModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isHostingModalOpen, setIsHostingModalOpen] = useState(false);
   
   const { 
     searchQuery, setSearchQuery, 
@@ -12,10 +16,20 @@ export const Topbar: React.FC = () => {
     roomings, 
     canUndo, canRedo, undo, redo,
     theme, toggleTheme,
-    syncFromGoogleSheets
+    syncFromGoogleSheets,
+    currentRole
   } = useStore();
 
   const hotelOptions = Array.from(new Set(roomings.map(r => r.hotel_name)));
+
+  const roleNames: Record<string, string> = {
+    admin: 'مدير النظام',
+    manager: 'مدير عمليات',
+    operations: 'إشراف تسكين',
+    finance: 'محاسب مالي',
+    supervisor: 'مشرف ميداني',
+    viewer: 'مشاهد فقط'
+  };
 
   return (
     <>
@@ -23,7 +37,7 @@ export const Topbar: React.FC = () => {
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 max-w-7xl mx-auto">
           
           {/* Search Bar */}
-          <div className="relative w-full sm:w-80">
+          <div className="relative w-full sm:w-72">
             <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
             <input
               type="text"
@@ -35,10 +49,10 @@ export const Topbar: React.FC = () => {
           </div>
 
           {/* Filters & Actions */}
-          <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-2">
+          <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-2 flex-wrap">
             
             {/* Hotel Filter */}
-            <div className="relative min-w-[140px] sm:min-w-[160px]">
+            <div className="relative min-w-[130px]">
               <Hotel className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500 pointer-events-none" />
               <select
                 value={selectedHotelFilter}
@@ -82,6 +96,26 @@ export const Topbar: React.FC = () => {
               <span className="hidden md:inline">مزامنة الشيت</span>
             </button>
 
+            {/* Free Hosting Guide Button */}
+            <button
+              onClick={() => setIsHostingModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-blue-500/10 hover:bg-blue-500/20 text-blue-700 dark:text-blue-400 border border-blue-500/30 rounded-xl transition-all shrink-0"
+              title="طريقة رفع الموقع أونلاين مجاناً 100%"
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline">الاستضافة المجانية</span>
+            </button>
+
+            {/* Role & Auth Login Button */}
+            <button
+              onClick={() => setIsAuthModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-extrabold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl transition-all shrink-0"
+              title="تسجيل الدخول وإدارة الصلاحيات"
+            >
+              <Shield className="w-3.5 h-3.5 text-amber-500" />
+              <span>{roleNames[currentRole] || 'تسجيل دخول'}</span>
+            </button>
+
             {/* EXE App Download Button */}
             <button
               onClick={() => setIsExeModalOpen(true)}
@@ -109,6 +143,18 @@ export const Topbar: React.FC = () => {
       <ExeDownloadModal 
         isOpen={isExeModalOpen} 
         onClose={() => setIsExeModalOpen(false)} 
+      />
+
+      {/* Auth & Role Manager Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+      />
+
+      {/* Hosting Guide Modal */}
+      <HostingGuideModal
+        isOpen={isHostingModalOpen}
+        onClose={() => setIsHostingModalOpen(false)}
       />
     </>
   );

@@ -22,6 +22,18 @@ export interface Pilgrim {
   notes?: string;
   needs_bed: boolean;
   room_number?: string;
+  
+  // Sheet-specific properties
+  program?: string;
+  visa_type?: string;
+  group_number?: string;
+  trip_number?: string;
+  arrival_time?: string;
+  return_trip?: string;
+  return_date?: string;
+  travel_time?: string;
+  departure_time?: string;
+  room_spec?: string;
 }
 
 export interface Trip {
@@ -100,6 +112,57 @@ export interface PreflightValidationResult {
   };
 }
 
+export type UserRole = 'admin' | 'manager' | 'operations' | 'finance' | 'supervisor' | 'viewer';
+
+export interface FinanceRecord {
+  id: string;
+  type: 'revenue' | 'expense';
+  category: string; // e.g. 'رسوم عمرة', 'حجز فنادق', 'تذاكر طيران', 'نقل حافلات', 'عمولات سماسرة', 'إعاشة وتغذية'
+  amount: number;
+  description: string;
+  date: string;
+  status: 'مكتمل' | 'معلق' | 'مسوى';
+  trip_id?: string;
+  invoice_number?: string;
+  party_name?: string; // Client or Supplier name
+  payment_method: 'تحويل بنكي' | 'نقداً' | 'شيك' | 'بطاقة سداد';
+}
+
+export interface DocumentRecord {
+  id: string;
+  title: string;
+  type: 'visa' | 'passport' | 'hotel_voucher' | 'ticket' | 'contract';
+  entity_type: 'pilgrim' | 'trip' | 'hotel' | 'company';
+  entity_id?: string;
+  entity_name?: string;
+  upload_date: string;
+  file_size?: string;
+  status: 'معتمد' | 'قيد المراجعة' | 'ينتهي قريباً';
+  file_url?: string;
+}
+
+export interface NotificationRecord {
+  id: string;
+  title: string;
+  message: string;
+  type: 'flight' | 'document' | 'payment' | 'hotel' | 'transport';
+  date: string;
+  read: boolean;
+  severity: 'low' | 'medium' | 'high';
+}
+
+export interface AccountingClosingRecord {
+  id: string;
+  period_name: string;
+  closing_date: string;
+  total_revenue: number;
+  total_expenses: number;
+  net_profit: number;
+  status: 'مغلق' | 'تحت التدقيق' | 'مفتوح';
+  closed_by: string;
+  notes?: string;
+}
+
 export interface AppSnapshot {
   pilgrims: Pilgrim[];
   trips: Trip[];
@@ -107,4 +170,9 @@ export interface AppSnapshot {
   staff: Staff[];
   transports: Transport[];
   familyGroups: FamilyGroup[];
+  financeRecords: FinanceRecord[];
+  documents: DocumentRecord[];
+  notifications: NotificationRecord[];
+  closings: AccountingClosingRecord[];
+  currentRole?: UserRole;
 }

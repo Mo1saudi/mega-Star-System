@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../lib/store';
 import { SEO } from '../components/SEO';
-import { FamilyGroup } from '../types';
+import { FamilyGroup, FamilyValidationResult } from '../types';
 import { 
   HeartHandshake, Plus, Users, ShieldAlert, AlertTriangle, 
   CheckCircle2, Trash2, Edit3, UserCheck, X 
@@ -21,8 +21,8 @@ export const FamilyLinksPage: React.FC = () => {
   const [selectedPilgrimIds, setSelectedPilgrimIds] = useState<string[]>([]);
   const [groupNotes, setGroupNotes] = useState('');
 
-  const validationResults = validateFamilyGroups();
-  const validationMap = new Map(validationResults.map(v => [v.groupId, v]));
+  const validationResults: FamilyValidationResult[] = validateFamilyGroups();
+  const validationMap = new Map<string, FamilyValidationResult>(validationResults.map(v => [v.groupId, v]));
 
   const handleOpenAddModal = () => {
     setEditingGroup(null);

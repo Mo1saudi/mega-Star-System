@@ -10,6 +10,12 @@ import { FamilyLinksPage } from './pages/FamilyLinksPage';
 import { RoomingPage } from './pages/RoomingPage';
 import { TripsTransportsPage } from './pages/TripsTransportsPage';
 import { StaffPage } from './pages/StaffPage';
+import { FinancePage } from './pages/FinancePage';
+import { ReportsPage } from './pages/ReportsPage';
+import { NotificationsPage } from './pages/NotificationsPage';
+import { DocumentsPage } from './pages/DocumentsPage';
+import { AccountingClosingPage } from './pages/AccountingClosingPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 import { Toaster } from 'sonner';
 
@@ -45,6 +51,18 @@ const AppContent: React.FC = () => {
         return <TripsTransportsPage />;
       case 'staff':
         return <StaffPage />;
+      case 'finance':
+        return <FinancePage />;
+      case 'reports':
+        return <ReportsPage />;
+      case 'notifications':
+        return <NotificationsPage />;
+      case 'documents':
+        return <DocumentsPage />;
+      case 'accounting-closing':
+        return <AccountingClosingPage />;
+      case 'settings':
+        return <SettingsPage />;
       default:
         return <DashboardPage />;
     }

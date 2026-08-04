@@ -1,6 +1,6 @@
 import React from 'react';
 import { useStore } from '../lib/store';
-import { LayoutDashboard, Users, HeartHandshake, BedDouble, PlaneTakeoff, UserCheck } from 'lucide-react';
+import { LayoutDashboard, Users, BedDouble, PlaneTakeoff, DollarSign, BarChart3, Settings } from 'lucide-react';
 
 export const MobileNav: React.FC = () => {
   const { activePage, setActivePage } = useStore();
@@ -8,10 +8,11 @@ export const MobileNav: React.FC = () => {
   const navItems = [
     { id: 'dashboard', label: 'الرئيسية', icon: LayoutDashboard },
     { id: 'pilgrims', label: 'المعتمرين', icon: Users },
-    { id: 'family-groups', label: 'العائلات', icon: HeartHandshake },
     { id: 'rooming', label: 'التسكين', icon: BedDouble },
     { id: 'trips-transports', label: 'الرحلات', icon: PlaneTakeoff },
-    { id: 'staff', label: 'الموظفون', icon: UserCheck },
+    { id: 'finance', label: 'المالية', icon: DollarSign },
+    { id: 'reports', label: 'التقارير', icon: BarChart3 },
+    { id: 'settings', label: 'الإعدادات', icon: Settings },
   ];
 
   return (

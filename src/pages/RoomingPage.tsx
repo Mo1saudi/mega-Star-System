@@ -18,7 +18,38 @@ export const RoomingPage: React.FC = () => {
   const [showPreflightModal, setShowPreflightModal] = useState(false);
   const [selectedHotelForPreflight, setSelectedHotelForPreflight] = useState<string>('');
 
-  const cityRoomings = roomings.filter(r => r.city === activeCityTab);
+  // Dynamically extract all unique hotels from pilgrims for Makkah and Madinah
+  const makkahHotelsFromPilgrims = Array.from(new Set(pilgrims.map(p => p.makkah_hotel).filter(Boolean)));
+  const madinahHotelsFromPilgrims = Array.from(new Set(pilgrims.map(p => p.madinah_hotel).filter(Boolean)));
+
+  // Combine store roomings with pilgrim hotels for the active city
+  const storeCityRoomings = roomings.filter(r => r.city === activeCityTab);
+  const cityHotelsFromPilgrims = activeCityTab === 'مكة' ? makkahHotelsFromPilgrims : madinahHotelsFromPilgrims;
+
+  // Unified list of hotel objects for rendering based on main sheet data
+  const hotelNamesSet = new Set([
+    ...storeCityRoomings.map(r => r.hotel_name),
+    ...cityHotelsFromPilgrims
+  ]);
+
+  const displayHotels = Array.from(hotelNamesSet).map((hotelName, idx) => {
+    const existing = storeCityRoomings.find(r => r.hotel_name === hotelName);
+    if (existing) return existing;
+
+    const hotelKey = activeCityTab === 'مكة' ? 'makkah_hotel' : 'madinah_hotel';
+    const hotelPilgrimsCount = pilgrims.filter(p => p[hotelKey] === hotelName).length;
+    const estimatedRooms = Math.max(1, Math.ceil(hotelPilgrimsCount / 3));
+
+    return {
+      id: `ROOM-DYN-${activeCityTab}-${idx + 1}`,
+      hotel_name: hotelName,
+      city: activeCityTab,
+      total_rooms: estimatedRooms,
+      double_rooms: Math.floor(estimatedRooms * 0.2),
+      triple_rooms: Math.floor(estimatedRooms * 0.3),
+      quad_rooms: Math.ceil(estimatedRooms * 0.5)
+    };
+  });
 
   const handleRunAutoRooming = (hotelName: string) => {
     autoRooming(hotelName, activeCityTab);
@@ -79,7 +110,18 @@ export const RoomingPage: React.FC = () => {
 
       {/* Hotel Cards & Roomings */}
       <div className="space-y-6">
-        {cityRoomings.map((hotel) => {
+        {displayHotels.length === 0 ? (
+          <div className="p-12 text-center bg-white dark:bg-[#151c2d] rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+            <Building className="w-12 h-12 text-slate-400 mx-auto" />
+            <h3 className="text-base font-bold text-slate-800 dark:text-slate-200 font-cairo">
+              لا توجد فنادق مسجلة حالياً لمدينة ({activeCityTab})
+            </h3>
+            <p className="text-xs text-slate-500">
+              تأكد من اختيار أو استيراد بيانات المعتمرين الموزعين على فنادق {activeCityTab}.
+            </p>
+          </div>
+        ) : (
+          displayHotels.map((hotel) => {
           const hotelKey = activeCityTab === 'مكة' ? 'makkah_hotel' : 'madinah_hotel';
           const hotelPilgrims = pilgrims.filter(p => p[hotelKey] === hotel.hotel_name);
           const assignedCount = hotelPilgrims.filter(p => p.room_number).length;
@@ -190,7 +232,7 @@ export const RoomingPage: React.FC = () => {
               </div>
             </div>
           );
-        })}
+        }))}
       </div>
 
       {/* Preflight Modal */}

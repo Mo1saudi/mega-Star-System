@@ -1,5 +1,9 @@
 import { AppSnapshot } from '../types';
-import { initialPilgrims, initialTrips, initialRoomings, initialStaff, initialTransports, initialFamilyGroups } from '../mock-data';
+import { 
+  initialPilgrims, initialTrips, initialRoomings, initialStaff, 
+  initialTransports, initialFamilyGroups, initialFinanceRecords,
+  initialDocuments, initialNotifications, initialClosings
+} from '../mock-data';
 
 const DB_NAME = 'MegaStarUmrahDB';
 const DB_VERSION = 1;
@@ -13,14 +17,7 @@ const DATA_KEY = 'latest_snapshot';
 export async function getLocalDatabaseStore(): Promise<AppSnapshot> {
   // Check if window object exists
   if (typeof window === 'undefined') {
-    return {
-      pilgrims: initialPilgrims,
-      trips: initialTrips,
-      roomings: initialRoomings,
-      staff: initialStaff,
-      transports: initialTransports,
-      familyGroups: initialFamilyGroups,
-    };
+    return getSeedSnapshot();
   }
 
   try {
@@ -28,7 +25,14 @@ export async function getLocalDatabaseStore(): Promise<AppSnapshot> {
     if (savedLocal) {
       const parsed = JSON.parse(savedLocal) as AppSnapshot;
       if (parsed.pilgrims && parsed.pilgrims.length > 0) {
-        return parsed;
+        return {
+          ...parsed,
+          financeRecords: parsed.financeRecords || initialFinanceRecords,
+          documents: parsed.documents || initialDocuments,
+          notifications: parsed.notifications || initialNotifications,
+          closings: parsed.closings || initialClosings,
+          currentRole: parsed.currentRole || 'admin',
+        };
       }
     }
   } catch (e) {
@@ -59,7 +63,15 @@ export async function getLocalDatabaseStore(): Promise<AppSnapshot> {
 
       getReq.onsuccess = () => {
         if (getReq.result) {
-          resolve(getReq.result as AppSnapshot);
+          const res = getReq.result as AppSnapshot;
+          resolve({
+            ...res,
+            financeRecords: res.financeRecords || initialFinanceRecords,
+            documents: res.documents || initialDocuments,
+            notifications: res.notifications || initialNotifications,
+            closings: res.closings || initialClosings,
+            currentRole: res.currentRole || 'admin',
+          });
         } else {
           const seed = getSeedSnapshot();
           saveLocalDatabaseStore(seed);
@@ -119,5 +131,10 @@ export function getSeedSnapshot(): AppSnapshot {
     staff: [...initialStaff],
     transports: [...initialTransports],
     familyGroups: [...initialFamilyGroups],
+    financeRecords: [...initialFinanceRecords],
+    documents: [...initialDocuments],
+    notifications: [...initialNotifications],
+    closings: [...initialClosings],
+    currentRole: 'admin',
   };
 }
