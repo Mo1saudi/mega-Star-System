@@ -1,0 +1,6 @@
+{
+  "name": "ميجا ستار - إدارة عمليات العمرة",
+  "description": "نظام متكامل لإدارة عمليات شركات العمرة، السجلات، الروابط العائلية، التسكين الذكي، الرحلات والنقل والموظفين.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

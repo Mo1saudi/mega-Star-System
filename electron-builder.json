@@ -1,0 +1,37 @@
+{
+  "appId": "com.megastar.umrah.app",
+  "productName": "ميجا ستار - إدارة عمليات العمرة",
+  "copyright": "حقوق الطبع محفوظة © ميجا ستار لتكنولوجيا العمرة",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist/**/*",
+    "dist-electron/**/*",
+    "node_modules/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "public/icon.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "ميجا ستار - إدارة العمرة",
+    "installerIcon": "public/icon.ico",
+    "uninstallerIcon": "public/icon.ico",
+    "installerHeaderTitle": "نظام ميجا ستار لتنظيم العمرة"
+  }
+}

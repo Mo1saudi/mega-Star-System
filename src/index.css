@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-cairo: 'Cairo', sans-serif;
+    --font-tajawal: 'Tajawal', sans-serif;
+  }
+
+  body {
+    font-family: var(--font-tajawal);
+    direction: rtl;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-cairo);
+  }
+}
+
+.font-cairo {
+  font-family: 'Cairo', sans-serif;
+}
+
+.font-tajawal {
+  font-family: 'Tajawal', sans-serif;
+}
+
+.gradient-gold {
+  background: linear-gradient(135deg, #d4af37 0%, #f3e5ab 50%, #aa7c11 100%);
+}
+
+.gradient-gold-text {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gradient-navy {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #090d16 100%);
+}
+
+.gradient-navy-card {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+}
+
+/* Custom scrollbar for table and drawers */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.4);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(107, 114, 128, 0.7);
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}
+
