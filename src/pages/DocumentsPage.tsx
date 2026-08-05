@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { useStore } from '../lib/store';
-import { FileText, Plus, Trash2, Download, Search, CheckCircle2, AlertCircle, FileCheck, Shield } from 'lucide-react';
+import { 
+  FileText, Plus, Trash2, Download, Search, CheckCircle2, 
+  AlertCircle, FileCheck, Shield, Upload, Image as ImageIcon, Eye, X 
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 export const DocumentsPage: React.FC = () => {
@@ -10,15 +13,36 @@ export const DocumentsPage: React.FC = () => {
   const [isAddOpen, setIsAddOpen] = useState(false);
 
   const [newTitle, setNewTitle] = useState('');
-  const [newType, setNewType] = useState<'visa' | 'passport' | 'hotel_voucher' | 'ticket' | 'contract'>('visa');
+  const [customType, setCustomType] = useState('تأشيرة مجمعة');
   const [newEntityName, setNewEntityName] = useState('');
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+
+  // Preview Image Modal
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
 
   const filteredDocs = documents.filter(doc => {
     const matchesSearch = doc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (doc.entity_name && doc.entity_name.toLowerCase().includes(searchTerm.toLowerCase()));
+      (doc.entity_name && doc.entity_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (doc.type && doc.type.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesType = filterType === 'all' || doc.type === filterType;
     return matchesSearch && matchesType;
   });
+
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 5 ميجابايت');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setUploadedImage(reader.result as string);
+        toast.success('تم رفع ورسخ صورة المستند بنجاح');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,36 +53,40 @@ export const DocumentsPage: React.FC = () => {
 
     addDocument({
       title: newTitle,
-      type: newType,
+      type: customType as any,
       entity_type: 'trip',
-      entity_name: newEntityName || 'رحلة عمرة عامة',
+      entity_name: newEntityName || 'عام',
       upload_date: new Date().toISOString().split('T')[0],
-      file_size: '2.1 MB',
+      file_size: uploadedImage ? '1.8 MB (صورة مرفقة)' : '2.1 MB',
       status: 'معتمد',
+      file_url: uploadedImage || undefined,
     });
 
+    toast.success(`تم حفظ واعتماد المستند (${newTitle}) بنجاح`);
     setIsAddOpen(false);
     setNewTitle('');
+    setCustomType('تأشيرة مجمعة');
     setNewEntityName('');
+    setUploadedImage(null);
   };
 
   return (
-    <div className="space-y-6 dir-rtl font-cairo animate-in fade-in duration-200">
+    <div className="space-y-6 dir-rtl font-cairo animate-in fade-in duration-200 pb-24">
       
       {/* Header */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white dark:bg-[#151c2d] p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
         <div>
           <div className="flex items-center gap-2">
             <span className="px-3 py-1 text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-full border border-amber-500/20">
-              خزينة المستندات والتأشيرات
+              خزينة المستندات والصور ERP
             </span>
             <span className="text-xs text-slate-400">تخزين آمن 100%</span>
           </div>
           <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white mt-2">
-            إدارة التأشيرات والعقود والفوتشرات
+            إدارة التأشيرات والعقود والفوتشرات والمستندات
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            أرشيف المستندات الرسمية، التأشيرات المجمعة، عقود النقل وفوتشرات الفنادق
+            أرشيف إلكتروني كامل للمستندات الرسمية مع إمكانية إدخال نوع المستند يدوياً ورفع صورة المستند
           </p>
         </div>
 
@@ -67,7 +95,7 @@ export const DocumentsPage: React.FC = () => {
           className="px-4 py-2.5 text-xs font-extrabold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-2xl shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-all active:scale-95"
         >
           <Plus className="w-4 h-4" />
-          <span>رفع مستند / عقد جديد</span>
+          <span>رفع مستند / صورة جديدة</span>
         </button>
       </div>
 
@@ -117,7 +145,7 @@ export const DocumentsPage: React.FC = () => {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="بحث باسم المستند أو الفندق..."
+              placeholder="بحث باسم أو نوع المستند..."
               className="w-full pr-9 pl-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
             />
           </div>
@@ -133,13 +161,18 @@ export const DocumentsPage: React.FC = () => {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="p-3 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20 shrink-0">
-                  <FileText className="w-6 h-6" />
+                  {doc.file_url ? <ImageIcon className="w-6 h-6 text-emerald-500" /> : <FileText className="w-6 h-6" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-extrabold text-slate-900 dark:text-white truncate">
                     {doc.title}
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-md">
+                      نوع المستند: {doc.type}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate">
                     الجهة: {doc.entity_name || 'عام'}
                   </p>
                 </div>
@@ -152,9 +185,23 @@ export const DocumentsPage: React.FC = () => {
                 </button>
               </div>
 
+              {/* Image Preview Thumbnail if attached */}
+              {doc.file_url && (
+                <div 
+                  onClick={() => setViewingImage(doc.file_url || null)}
+                  className="relative group rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 max-h-36 cursor-pointer bg-slate-900"
+                >
+                  <img src={doc.file_url} alt={doc.title} className="w-full h-36 object-cover group-hover:scale-105 transition-transform duration-200 opacity-90" />
+                  <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 text-white text-xs font-bold">
+                    <Eye className="w-4 h-4" />
+                    <span>عرض الصورة بالكامل</span>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-200 dark:border-slate-700/60 pt-3">
-                <span className="font-mono">الحجم: {doc.file_size || '1.5 MB'}</span>
-                <span className="font-mono">تاريخ الرفع: {doc.upload_date}</span>
+                <span className="font-mono">{doc.file_size || '1.5 MB'}</span>
+                <span className="font-mono">{doc.upload_date}</span>
                 <span className="px-2 py-0.5 font-bold rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                   {doc.status}
                 </span>
@@ -170,7 +217,7 @@ export const DocumentsPage: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4 animate-in fade-in">
           <div className="bg-white dark:bg-[#151c2d] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-3">
-              رفع واعتماد مستند جديد
+              رفع واعتماد مستند أو صورة جديدة
             </h3>
             <form onSubmit={handleAddSubmit} className="space-y-4">
               <div>
@@ -181,7 +228,7 @@ export const DocumentsPage: React.FC = () => {
                   type="text"
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="مثال: عقود حافلات نقل مكة والمدينة"
+                  placeholder="مثال: صورة فوتشر أنجم مكة / عقد الحافلات"
                   required
                   className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
                 />
@@ -189,19 +236,26 @@ export const DocumentsPage: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  نوع المستند
+                  نوع المستند (يمكنك إدخال أي نوع يدوياً)
                 </label>
-                <select
-                  value={newType}
-                  onChange={(e: any) => setNewType(e.target.value)}
+                <input
+                  type="text"
+                  list="doc-types-list"
+                  value={customType}
+                  onChange={(e) => setCustomType(e.target.value)}
+                  placeholder="أدخل نوع المستند يدوياً..."
+                  required
                   className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
-                >
-                  <option value="visa">تأشيرات مجمعة</option>
-                  <option value="hotel_voucher">فوتشر فندق</option>
-                  <option value="contract">عقد شركة نقل / طيران</option>
-                  <option value="passport">جواز سفر معتمر</option>
-                  <option value="ticket">تذكرة طيران</option>
-                </select>
+                />
+                <datalist id="doc-types-list">
+                  <option value="تأشيرة مجمعة" />
+                  <option value="فوتشر فندق" />
+                  <option value="عقد حافلات ونقل" />
+                  <option value="جواز سفر معتمر" />
+                  <option value="تذكرة طيران" />
+                  <option value="إيصال استلام نقدية" />
+                  <option value="كشف تفويج معتمرين" />
+                </datalist>
               </div>
 
               <div>
@@ -215,6 +269,24 @@ export const DocumentsPage: React.FC = () => {
                   placeholder="مثال: فندق أنجم مكة / رحلة الطليعة 1"
                   className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  رفع صورة المستند / الجواز / الفوتشر
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageFileChange}
+                  className="w-full text-xs text-slate-500 file:mr-0 file:ml-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-500 file:text-slate-950 hover:file:bg-amber-400 cursor-pointer"
+                />
+                {uploadedImage && (
+                  <div className="mt-2 rounded-xl overflow-hidden border border-emerald-500/40 p-1 bg-emerald-500/10 flex items-center gap-2 text-emerald-600 text-xs font-bold">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+                    <span className="truncate">تمت إضافة الصورة بنجاح!</span>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
@@ -233,6 +305,21 @@ export const DocumentsPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Full Image Preview Modal */}
+      {viewingImage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-in fade-in">
+          <div className="relative max-w-4xl max-h-[90vh] bg-slate-900 rounded-3xl p-4 overflow-hidden shadow-2xl border border-slate-800 flex flex-col items-center">
+            <button
+              onClick={() => setViewingImage(null)}
+              className="absolute top-4 left-4 p-2 rounded-full bg-slate-800 text-slate-300 hover:bg-rose-600 hover:text-white transition-all z-10"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <img src={viewingImage} alt="عرض المستند" className="max-h-[80vh] w-auto object-contain rounded-2xl" />
           </div>
         </div>
       )}

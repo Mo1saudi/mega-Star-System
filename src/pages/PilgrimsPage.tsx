@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 
 export const PilgrimsPage: React.FC = () => {
   const { 
-    pilgrims, trips, roomings, selectedHotelFilter, setSelectedHotelFilter,
+    pilgrims, trips, transports, roomings, selectedHotelFilter, setSelectedHotelFilter,
     searchQuery, setSearchQuery, addPilgrim, updatePilgrim, deletePilgrim, 
     bulkUpdatePilgrims, bulkDeletePilgrims, importPilgrims, ocrExtractPassport 
   } = useStore();
@@ -93,6 +93,8 @@ export const PilgrimsPage: React.FC = () => {
   const [bulkMakkahHotel, setBulkMakkahHotel] = useState('');
   const [bulkRoomType, setBulkRoomType] = useState<RoomType | ''>('');
   const [bulkVisaStatus, setBulkVisaStatus] = useState<VisaStatus | ''>('');
+  const [bulkTripId, setBulkTripId] = useState('');
+  const [bulkTransportId, setBulkTransportId] = useState('');
 
   // File input ref for Excel import and Passport OCR
   const excelFileRef = useRef<HTMLInputElement>(null);
@@ -276,6 +278,8 @@ export const PilgrimsPage: React.FC = () => {
     if (bulkMakkahHotel) updates.makkah_hotel = bulkMakkahHotel;
     if (bulkRoomType) updates.room_type = bulkRoomType;
     if (bulkVisaStatus) updates.visa_status = bulkVisaStatus;
+    if (bulkTripId) updates.trip_id = bulkTripId;
+    if (bulkTransportId) updates.transport_id = bulkTransportId;
 
     if (Object.keys(updates).length === 0) {
       toast.error('لم تقم باختيار أي حقل للتعديل الجماعي');
@@ -283,8 +287,14 @@ export const PilgrimsPage: React.FC = () => {
     }
 
     bulkUpdatePilgrims(selectedIds, updates);
+    toast.success(`تم التعديل الجماعي لـ (${selectedIds.length}) معتمر بنجاح!`);
     setShowBulkEditModal(false);
     setSelectedIds([]);
+    setBulkMakkahHotel('');
+    setBulkRoomType('');
+    setBulkVisaStatus('');
+    setBulkTripId('');
+    setBulkTransportId('');
   };
 
   // Safa Excel / CSV Import Parser
@@ -818,7 +828,26 @@ export const PilgrimsPage: React.FC = () => {
                             {p.gender}
                           </span>
                         </td>
-                        <td className="p-3 font-mono font-semibold text-slate-700 dark:text-slate-300">{p.passport_number}</td>
+                        <td className="p-3 font-mono font-semibold text-slate-700 dark:text-slate-300">
+                          <div>{p.passport_number}</div>
+                          {p.passport_expiry_date && (
+                            <div className="text-[10px] flex items-center gap-1 mt-0.5 font-sans">
+                              <span className="text-slate-400">ينتهي:</span>
+                              <span className="font-mono text-slate-500 dark:text-slate-400">{p.passport_expiry_date}</span>
+                              {(() => {
+                                const exp = new Date(p.passport_expiry_date);
+                                const today = new Date();
+                                const diffDays = Math.ceil((exp.getTime() - today.getTime()) / (1000 * 3600 * 24));
+                                if (diffDays <= 0) {
+                                  return <span className="px-1.5 py-0.2 bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded text-[9px] font-bold">منتهي</span>;
+                                } else if (diffDays <= 180) {
+                                  return <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-700 dark:text-amber-400 rounded text-[9px] font-bold">ينتهي قريباً ({diffDays} يوم)</span>;
+                                }
+                                return null;
+                              })()}
+                            </div>
+                          )}
+                        </td>
                         <td className="p-3 text-slate-600 dark:text-slate-400">{p.agent_main}</td>
                         <td className="p-3 text-slate-600 dark:text-slate-400">{p.madinah_hotel}</td>
                         <td className="p-3">
@@ -1089,6 +1118,40 @@ export const PilgrimsPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">تخصيص رحلة الطيران</label>
+                  <select
+                    value={formData.trip_id || ''}
+                    onChange={e => setFormData({ ...formData, trip_id: e.target.value })}
+                    className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
+                  >
+                    <option value="">-- غير مسجل برحلة طيران --</option>
+                    {trips.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.trip_name} (PNR: {t.pnr}) - {t.airline}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">تخصيص حافلة/حركة النقل</label>
+                  <select
+                    value={formData.transport_id || ''}
+                    onChange={e => setFormData({ ...formData, transport_id: e.target.value })}
+                    className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
+                  >
+                    <option value="">-- غير مسجل بحافلة نقل --</option>
+                    {transports.map(tr => (
+                      <option key={tr.id} value={tr.id}>
+                        {tr.trip_name || tr.shift_number} ({tr.vehicle_type})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">رقم المجموعة</label>
                   <input
                     type="text"
@@ -1105,7 +1168,7 @@ export const PilgrimsPage: React.FC = () => {
                     type="text"
                     value={formData.trip_number || ''}
                     onChange={e => setFormData({ ...formData, trip_number: e.target.value })}
-                    placeholder="مثال: 2525147"
+                    placeholder="رقم الرحلة"
                     className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none font-mono"
                   />
                 </div>
@@ -1172,6 +1235,38 @@ export const PilgrimsPage: React.FC = () => {
             </h3>
 
             <div className="space-y-3 text-right">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">تخصيص رحلة الطيران الجماعية</label>
+                <select
+                  value={bulkTripId}
+                  onChange={e => setBulkTripId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
+                >
+                  <option value="">-- بدون تغيير --</option>
+                  {trips.map(t => (
+                    <option key={t.id} value={t.id}>
+                      ✈️ {t.trip_name} (PNR: {t.pnr}) - {t.airline}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">تخصيص حافلة/حركة النقل الجماعية</label>
+                <select
+                  value={bulkTransportId}
+                  onChange={e => setBulkTransportId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
+                >
+                  <option value="">-- بدون تغيير --</option>
+                  {transports.map(tr => (
+                    <option key={tr.id} value={tr.id}>
+                      🚌 {tr.trip_name || tr.shift_number} ({tr.vehicle_type}) - {tr.date || 'اليوم'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">تعديل فندق مكة المكرمة</label>
                 <select

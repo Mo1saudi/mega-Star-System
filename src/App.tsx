@@ -11,11 +11,13 @@ import { RoomingPage } from './pages/RoomingPage';
 import { TripsTransportsPage } from './pages/TripsTransportsPage';
 import { StaffPage } from './pages/StaffPage';
 import { FinancePage } from './pages/FinancePage';
+import { IncentivesCommissionsPage } from './pages/IncentivesCommissionsPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { AccountingClosingPage } from './pages/AccountingClosingPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { PendingApprovalModal } from './components/PendingApprovalModal';
 
 import { Toaster } from 'sonner';
 
@@ -53,6 +55,8 @@ const AppContent: React.FC = () => {
         return <StaffPage />;
       case 'finance':
         return <FinancePage />;
+      case 'incentives-commissions':
+        return <IncentivesCommissionsPage />;
       case 'reports':
         return <ReportsPage />;
       case 'notifications':
@@ -85,6 +89,9 @@ const AppContent: React.FC = () => {
 
       {/* Mobile Navigation Bar */}
       <MobileNav />
+
+      {/* Google Sign-in Pending Approval Gate */}
+      <PendingApprovalModal />
 
       {/* RTL Sonner Notifications */}
       <Toaster 

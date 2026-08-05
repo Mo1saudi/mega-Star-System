@@ -149,7 +149,7 @@ app.get('/api/sync-sheet', async (req, res) => {
       const name = rawCols[1] ? String(rawCols[1]).trim() : '';
       const agentMain = rawCols[2] ? String(rawCols[2]).trim() : 'الشركة';
       const agentSub = rawCols[3] ? String(rawCols[3]).trim() : '';
-      const passport = rawCols[4] ? String(rawCols[4]).trim() : `A${20000000 + i}`;
+      const passport = rawCols[4] ? String(rawCols[4]).trim() : '';
       const permits = rawCols[5] ? String(rawCols[5]).trim() : '';
       let roomSpec = rawCols[6] ? String(rawCols[6]).trim() : '';
       const genderRaw = rawCols[7] ? String(rawCols[7]).trim() : 'ذكر';
@@ -160,8 +160,8 @@ app.get('/api/sync-sheet', async (req, res) => {
       const makkahHotel = rawCols[12] ? String(rawCols[12]).trim() : 'نخبه الخير';
       const madinahHotel = rawCols[13] ? String(rawCols[13]).trim() : 'مجموعه ديار';
       const tripName = rawCols[14] ? String(rawCols[14]).trim() : 'رحلة العمرة الرئيسية';
-      const groupNo = rawCols[15] ? String(rawCols[15]).trim() : '101';
-      const tripNo = rawCols[16] ? String(rawCols[16]).trim() : '2525147';
+      const groupNo = rawCols[15] ? String(rawCols[15]).trim() : '';
+      const tripNo = rawCols[16] ? String(rawCols[16]).trim() : '';
       const arrivalTime = rawCols[17] ? String(rawCols[17]).trim() : '';
       const returnTrip = rawCols[18] ? String(rawCols[18]).trim() : '';
       const returnDate = rawCols[19] ? String(rawCols[19]).trim() : '';
@@ -193,12 +193,16 @@ app.get('/api/sync-sheet', async (req, res) => {
 
       const pilgrimId = `PIL-SHEET-${1000 + pilgrims.length + 1}`;
 
-      // Family & Relationship Link Extraction
+      // Detect withdrawn or cancelled status
+      const isWithdrawn = /سحب|إلغاء|الغاء|ملغي|مسحوب|مستبعد/i.test(`${program} ${notes} ${roomSpec}`);
+      const withdrawalStatus = isWithdrawn ? 'مسحوب/ملغي' : 'نشط';
+
+      // Family & Relationship Link Extraction (ONLY for active pilgrims)
       let familyLink = '';
       const combinedNotes = `${notes} ${roomSpec}`.trim();
       const hasRelationKeywords = /زوج|زوجة|زوجين|أزواج|اخوات|إخوة|اخت|أخت|بنت|ام|أم|أب|والد|ابن|اسره|أسرة|عائلة|مع بعض|خاصة|أصحاب|اصحاب|تقسيط/i.test(combinedNotes);
 
-      if (hasRelationKeywords) {
+      if (!isWithdrawn && hasRelationKeywords) {
         const familyKey = combinedNotes.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]/gi, '');
         if (!familyGroupMap.has(familyKey)) {
           const newFamId = `FAM-SHEET-${1000 + familyCounter++}`;
@@ -214,10 +218,6 @@ app.get('/api/sync-sheet', async (req, res) => {
         familyLink = famObj.id;
       }
 
-      // Detect withdrawn or cancelled status
-      const isWithdrawn = /سحب|إلغاء|الغاء|ملغي|مسحوب/i.test(`${program} ${notes} ${roomSpec}`);
-      const withdrawalStatus = isWithdrawn ? 'مسحوب/ملغي' : 'نشط';
-
       pilgrims.push({
         id: pilgrimId,
         name: name.replace(/^"|"$/g, '').trim(),
@@ -231,7 +231,7 @@ app.get('/api/sync-sheet', async (req, res) => {
         makkah_hotel: makkahHotel,
         madinah_hotel: madinahHotel,
         room_type: roomType,
-        family_group_link: familyLink || undefined,
+        family_group_link: !isWithdrawn && familyLink ? familyLink : undefined,
         trip_id: `TRIP-${tripNo || groupNo || '101'}`,
         needs_bed: !isWithdrawn,
         notes: [notes, permits, roomSpec].filter(Boolean).join(' | '),
@@ -314,6 +314,7 @@ app.get('/api/sync-sheet', async (req, res) => {
     // Pass 1: Cross-match named spouse references (e.g., "زوج سوزان حافظ" <-> "زوجة يحيى احمد")
     for (let i = 0; i < pilgrims.length; i++) {
       const p1 = pilgrims[i];
+      if (p1.is_withdrawn) continue;
       const p1Target = extractTargetSpouseName(p1.notes || '');
 
       if (!p1Target) continue;
@@ -326,6 +327,7 @@ app.get('/api/sync-sheet', async (req, res) => {
       for (let j = 0; j < pilgrims.length; j++) {
         if (i === j) continue;
         const p2 = pilgrims[j];
+        if (p2.is_withdrawn) continue;
         const normP2Name = normalizeArabicName(p2.name);
 
         const targetFirstTwoWords = normP1Target.split(' ').slice(0, 2).join(' ');
@@ -374,6 +376,8 @@ app.get('/api/sync-sheet', async (req, res) => {
       const current = pilgrims[i];
       const next = pilgrims[i + 1];
 
+      if (current.is_withdrawn || next.is_withdrawn) continue;
+
       const cNotes = `${current.notes || ''} ${current.room_spec || ''}`;
       const nNotes = `${next.notes || ''} ${next.room_spec || ''}`;
 
@@ -400,6 +404,43 @@ app.get('/api/sync-sheet', async (req, res) => {
         next.family_group_link = famId;
       }
     }
+
+    // =========================================================================
+    // Pass 3: NUMBERED FAMILY LINKS FOR UNLINKED PILGRIMS
+    // People without explicit family links are added to numbered links
+    // e.g. "رابط رقم 1", "رابط رقم 2", etc. grouped by gender (Sharia rules).
+    // Females are grouped together without requiring a male mahram.
+    // =========================================================================
+    let numberedLinkCounter = 1;
+    const unlinkedActive = pilgrims.filter(p => !p.is_withdrawn && !p.family_group_link);
+
+    const unlinkedMales = unlinkedActive.filter(p => p.gender === 'ذكر');
+    const unlinkedFemales = unlinkedActive.filter(p => p.gender === 'أنثى');
+
+    const createNumberedLinks = (list: any[], genderLabel: string) => {
+      const chunkSize = 4;
+      for (let k = 0; k < list.length; k += chunkSize) {
+        const chunk = list.slice(k, k + chunkSize);
+        const linkId = `FAM-NUM-${1000 + numberedLinkCounter}`;
+        const linkName = `رابط رقم ${numberedLinkCounter}`;
+
+        familyGroupMap.set(linkId, {
+          id: linkId,
+          group_name: linkName,
+          pilgrim_ids: chunk.map(p => p.id),
+          notes: `رابط رقم ${numberedLinkCounter} - مجموعة ${genderLabel}`
+        });
+
+        chunk.forEach(p => {
+          p.family_group_link = linkId;
+        });
+
+        numberedLinkCounter++;
+      }
+    };
+
+    createNumberedLinks(unlinkedMales, 'رجال');
+    createNumberedLinks(unlinkedFemales, 'سيدات');
 
     // Build Staff / Supervisors from sheet delegates
     const staff: any[] = [];
@@ -432,112 +473,8 @@ app.get('/api/sync-sheet', async (req, res) => {
       status: 'جاهز'
     }));
 
-    // Build Finance Records from Sheet Programs & Active Pilgrims
+    // Build Finance Records (Google Sheet contains no financial amounts, so records start empty unless added manually)
     const financeRecords: any[] = [];
-    let finIdx = 1;
-
-    // Cost rates per program type
-    const programRates: Record<string, number> = {
-      'تأشيرة فقط': 1400,
-      'برنامج عمره': 3800,
-      'تأشيرة وباركود': 1900,
-      'تذكرة فقط': 1100,
-    };
-
-    programStatsMap.forEach((pCount, pName) => {
-      const isWithdrawnProg = /سحب|إلغاء|الغاء|ملغي|مسحوب/i.test(pName);
-
-      if (isWithdrawnProg) {
-        // Exclude withdrawn/cancelled program from revenue calculations
-        financeRecords.push({
-          id: `FIN-SHEET-${1000 + finIdx}`,
-          type: 'revenue',
-          category: 'سحب وإلغاء',
-          amount: 0,
-          description: `سجلات سحب وإلغاء لبرنامج (${pName}) - عدد ${pCount} معتمر (ملغي ومستبعد من الأرباح)`,
-          date: new Date().toISOString().split('T')[0],
-          status: 'مكتمل',
-          party_name: 'معتمرين ملغيين',
-          payment_method: 'تحويل بنكي',
-          is_withdrawn: true
-        });
-      } else {
-        const rate = programRates[pName] || 3200;
-        const totalAmount = pCount * rate;
-
-        financeRecords.push({
-          id: `FIN-SHEET-${1000 + finIdx}`,
-          type: 'revenue',
-          category: 'رسوم عمرة',
-          amount: totalAmount,
-          description: `مقبوضات باقات برنامج (${pName}) - عدد ${pCount} معتمر فعلي`,
-          date: new Date().toISOString().split('T')[0],
-          status: 'مكتمل',
-          party_name: 'وكلاء المبيعات والمندوبين',
-          invoice_number: `INV-PROG-${1000 + finIdx}`,
-          payment_method: 'تحويل بنكي',
-          is_withdrawn: false
-        });
-      }
-      finIdx++;
-    });
-
-    // Active Pilgrims Count (excluding withdrawn)
-    const activePilgrimsCount = pilgrims.filter(p => !p.is_withdrawn).length;
-
-    // Hotel accommodation expenses (calculated ONLY for active pilgrims)
-    let hotelExpIdx = 1;
-    makkahHotelsMap.forEach((_, hotelName) => {
-      const activeInHotel = pilgrims.filter(p => p.makkah_hotel === hotelName && !p.is_withdrawn).length;
-      if (activeInHotel > 0) {
-        const totalHotelCost = activeInHotel * 1250;
-        financeRecords.push({
-          id: `FIN-EXP-HTL-${1000 + hotelExpIdx}`,
-          type: 'expense',
-          category: 'حجز فنادق',
-          amount: totalHotelCost,
-          description: `تكلفة حجز فندق (${hotelName}) - مكة المكرمة لـ ${activeInHotel} معتمر فعلي`,
-          date: new Date().toISOString().split('T')[0],
-          status: 'مكتمل',
-          party_name: hotelName,
-          invoice_number: `INV-HTL-${100 + hotelExpIdx}`,
-          payment_method: 'تحويل بنكي',
-          is_withdrawn: false
-        });
-        hotelExpIdx++;
-      }
-    });
-
-    // Flight & Transport Trip Expenses
-    if (activePilgrimsCount > 0) {
-      financeRecords.push({
-        id: `FIN-EXP-FLT-1001`,
-        type: 'expense',
-        category: 'تذاكر طيران',
-        amount: activePilgrimsCount * 1100,
-        description: `تكلفة حجوزات الطيران والطيران العارض لـ ${activePilgrimsCount} معتمر فعلي`,
-        date: new Date().toISOString().split('T')[0],
-        status: 'مكتمل',
-        party_name: 'مصر للطيران / الخطوط السعودية',
-        invoice_number: 'INV-FLT-1448',
-        payment_method: 'تحويل بنكي',
-        is_withdrawn: false
-      });
-
-      financeRecords.push({
-        id: `FIN-EXP-TRN-1001`,
-        type: 'expense',
-        category: 'نقل حافلات',
-        amount: activePilgrimsCount * 350,
-        description: `تكاليف حافلات VIP والانتقالات بين مكة والمدينة لـ ${activePilgrimsCount} معتمر`,
-        date: new Date().toISOString().split('T')[0],
-        status: 'مكتمل',
-        party_name: 'شركة الحافلات الوطنية',
-        invoice_number: 'INV-TRN-1448',
-        payment_method: 'تحويل بنكي',
-        is_withdrawn: false
-      });
-    }
 
     // Build Roomings array from Makkah and Madinah Hotels in the Sheet
     const roomings: any[] = [];

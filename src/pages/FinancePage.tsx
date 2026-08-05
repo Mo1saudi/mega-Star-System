@@ -22,6 +22,7 @@ export const FinancePage: React.FC = () => {
 
   // Ledger Filter State
   const [filterType, setFilterType] = useState<'all' | 'revenue' | 'expense' | 'withdrawn'>('all');
+  const [filterCurrency, setFilterCurrency] = useState<'all' | 'SAR' | 'EGP'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [aiInsightText, setAiInsightText] = useState<string | null>(null);
@@ -35,6 +36,7 @@ export const FinancePage: React.FC = () => {
   const [newType, setNewType] = useState<'revenue' | 'expense'>('revenue');
   const [newCategory, setNewCategory] = useState('رسوم عمرة');
   const [newAmount, setNewAmount] = useState('');
+  const [newCurrency, setNewCurrency] = useState<'SAR' | 'EGP'>('SAR');
   const [newDesc, setNewDesc] = useState('');
   const [newParty, setNewParty] = useState('');
   const [newInvoice, setNewInvoice] = useState('');
@@ -45,7 +47,19 @@ export const FinancePage: React.FC = () => {
   const [settlingPilgrim, setSettlingPilgrim] = useState<Pilgrim | null>(null);
   const [settlementRefundAmount, setSettlementRefundAmount] = useState('');
   const [settlementFeeAmount, setSettlementFeeAmount] = useState('');
+  const [settlementCurrency, setSettlementCurrency] = useState<'SAR' | 'EGP'>('SAR');
   const [settlementNotes, setSettlementNotes] = useState('');
+
+  // Helper getters for record amounts in SAR and EGP
+  const getRecordAmountSar = (r: FinanceRecord) => {
+    if (r.currency === 'EGP') return r.amount / (exchangeRate || 1);
+    return r.amount;
+  };
+
+  const getRecordAmountEgp = (r: FinanceRecord) => {
+    if (r.currency === 'EGP') return r.amount;
+    return r.amount * (exchangeRate || 1);
+  };
 
   // Dual Currency Formatter Helper
   const formatDual = (amountInSar: number) => {
@@ -60,16 +74,23 @@ export const FinancePage: React.FC = () => {
   };
 
   // Calculations (Excluding withdrawn & cancelled records from active operational budget)
-  const totalRevenue = financeRecords
-    .filter(r => r.type === 'revenue' && !r.is_withdrawn && r.category !== 'سحب وإلغاء')
-    .reduce((sum, r) => sum + r.amount, 0);
+  const activeRevenues = financeRecords.filter(r => r.type === 'revenue' && !r.is_withdrawn && r.category !== 'سحب وإلغاء');
+  const activeExpenses = financeRecords.filter(r => r.type === 'expense' && !r.is_withdrawn);
 
-  const totalExpense = financeRecords
-    .filter(r => r.type === 'expense' && !r.is_withdrawn)
-    .reduce((sum, r) => sum + r.amount, 0);
+  const totalRevenueSar = activeRevenues.reduce((sum, r) => sum + getRecordAmountSar(r), 0);
+  const totalRevenueEgp = activeRevenues.reduce((sum, r) => sum + getRecordAmountEgp(r), 0);
 
-  const netProfit = totalRevenue - totalExpense;
-  const profitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : '0';
+  const totalExpenseSar = activeExpenses.reduce((sum, r) => sum + getRecordAmountSar(r), 0);
+  const totalExpenseEgp = activeExpenses.reduce((sum, r) => sum + getRecordAmountEgp(r), 0);
+
+  const netProfitSar = totalRevenueSar - totalExpenseSar;
+  const netProfitEgp = totalRevenueEgp - totalExpenseEgp;
+
+  const activeTotalRevenue = currency === 'EGP' ? totalRevenueEgp : totalRevenueSar;
+  const activeTotalExpense = currency === 'EGP' ? totalExpenseEgp : totalExpenseSar;
+  const activeNetProfit = currency === 'EGP' ? netProfitEgp : netProfitSar;
+
+  const profitMargin = activeTotalRevenue > 0 ? ((activeNetProfit / activeTotalRevenue) * 100).toFixed(1) : '0';
 
   // Withdrawn & Cancelled Pilgrims count & records
   const withdrawnPilgrims = pilgrims.filter(p => 
@@ -79,35 +100,40 @@ export const FinancePage: React.FC = () => {
 
   const withdrawnPilgrimsCount = withdrawnPilgrims.length;
   const withdrawnRecords = financeRecords.filter(r => r.is_withdrawn || r.category === 'سحب وإلغاء');
-  const withdrawnTotalRefunds = withdrawnRecords
+  const withdrawnTotalRefundsSar = withdrawnRecords
     .filter(r => r.type === 'expense')
-    .reduce((sum, r) => sum + r.amount, 0);
+    .reduce((sum, r) => sum + getRecordAmountSar(r), 0);
 
   // Trip Costs Breakdown Categories
-  const hotelExpensesTotal = financeRecords
+  const hotelExpensesTotalSar = financeRecords
     .filter(r => r.type === 'expense' && !r.is_withdrawn && (r.category.includes('فنادق') || r.category.includes('سكن')))
-    .reduce((sum, r) => sum + r.amount, 0);
+    .reduce((sum, r) => sum + getRecordAmountSar(r), 0);
 
-  const flightExpensesTotal = financeRecords
+  const flightExpensesTotalSar = financeRecords
     .filter(r => r.type === 'expense' && !r.is_withdrawn && (r.category.includes('طيران') || r.category.includes('تذاكر')))
-    .reduce((sum, r) => sum + r.amount, 0);
+    .reduce((sum, r) => sum + getRecordAmountSar(r), 0);
 
-  const transportExpensesTotal = financeRecords
+  const transportExpensesTotalSar = financeRecords
     .filter(r => r.type === 'expense' && !r.is_withdrawn && (r.category.includes('نقل') || r.category.includes('حافلات')))
-    .reduce((sum, r) => sum + r.amount, 0);
+    .reduce((sum, r) => sum + getRecordAmountSar(r), 0);
 
   // Agent Statements Calculations (Grouped by Agent)
-  const agentMap = new Map<string, { name: string; totalPilgrims: number; withdrawnPilgrims: number; estimatedRevenue: number }>();
+  const agentMap = new Map<string, { name: string; totalPilgrims: number; withdrawnPilgrims: number; estimatedRevenueSar: number }>();
   pilgrims.forEach(p => {
     const agentName = p.agent_main || p.agent_sub || 'مباشر / أفراد';
-    const curr = agentMap.get(agentName) || { name: agentName, totalPilgrims: 0, withdrawnPilgrims: 0, estimatedRevenue: 0 };
+    const curr = agentMap.get(agentName) || { name: agentName, totalPilgrims: 0, withdrawnPilgrims: 0, estimatedRevenueSar: 0 };
     curr.totalPilgrims += 1;
     if (p.is_withdrawn || /سحب|إلغاء|الغاء|ملغي|مسحوب/i.test(`${p.notes || ''} ${p.withdrawal_status || ''}`)) {
       curr.withdrawnPilgrims += 1;
-    } else {
-      curr.estimatedRevenue += 3500; // Estimated baseline package cost per pilgrim
     }
     agentMap.set(agentName, curr);
+  });
+
+  // Calculate actual recorded revenue for each agent from financeRecords
+  agentMap.forEach((val, key) => {
+    val.estimatedRevenueSar = financeRecords
+      .filter(r => r.type === 'revenue' && !r.is_withdrawn && (r.party_name === key || (r.description && r.description.includes(key))))
+      .reduce((sum, r) => sum + getRecordAmountSar(r), 0);
   });
   const agentList = Array.from(agentMap.values());
 
@@ -118,13 +144,17 @@ export const FinancePage: React.FC = () => {
     else if (filterType === 'expense') matchesType = record.type === 'expense' && !record.is_withdrawn;
     else if (filterType === 'withdrawn') matchesType = record.is_withdrawn === true || record.category === 'سحب وإلغاء';
 
+    let matchesCurrency = true;
+    if (filterCurrency === 'SAR') matchesCurrency = (record.currency || 'SAR') === 'SAR';
+    else if (filterCurrency === 'EGP') matchesCurrency = record.currency === 'EGP';
+
     const matchesSearch = 
       record.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
       record.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (record.party_name && record.party_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (record.invoice_number && record.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    return matchesType && matchesSearch;
+    return matchesType && matchesCurrency && matchesSearch;
   });
 
   const handleAddSubmit = (e: React.FormEvent) => {
@@ -138,6 +168,7 @@ export const FinancePage: React.FC = () => {
       type: newType,
       category: newCategory,
       amount: Number(newAmount),
+      currency: newCurrency,
       description: newDesc || (newType === 'revenue' ? 'تحصيل باقة عمرة' : 'مصروف عمليات'),
       date: new Date().toISOString().split('T')[0],
       status: 'مكتمل',
@@ -166,6 +197,7 @@ export const FinancePage: React.FC = () => {
     setSettlingPilgrim(pilgrim);
     setSettlementRefundAmount('3000');
     setSettlementFeeAmount('500');
+    setSettlementCurrency('SAR');
     setSettlementNotes(`تسوية وإلغاء معتمر ${pilgrim.name} - جواز: ${pilgrim.passport_number}`);
   };
 
@@ -181,6 +213,7 @@ export const FinancePage: React.FC = () => {
         type: 'expense',
         category: 'سحب وإلغاء',
         amount: refundVal,
+        currency: settlementCurrency,
         description: `استرداد المبلغ للمعتمر الملغي: ${settlingPilgrim.name} (${settlementNotes})`,
         date: new Date().toISOString().split('T')[0],
         status: 'مسوى',
@@ -197,6 +230,7 @@ export const FinancePage: React.FC = () => {
         type: 'revenue',
         category: 'سحب وإلغاء',
         amount: feeVal,
+        currency: settlementCurrency,
         description: `رسوم/غرامة إلغاء محصلة من: ${settlingPilgrim.name}`,
         date: new Date().toISOString().split('T')[0],
         status: 'مسوى',
@@ -212,13 +246,15 @@ export const FinancePage: React.FC = () => {
   };
 
   const handleExportCSV = () => {
-    const headers = ['رقم القيد', 'النوع', 'الفئة', 'المبلغ (ر.س)', 'المبلغ (ج.م)', 'البيان', 'الطرف الآخر', 'التاريخ', 'طريقة الدفع', 'حالة السحب'];
+    const headers = ['رقم القيد', 'النوع', 'الفئة', 'العملة الأصلية', 'المبلغ الأصلي', 'المعادل بالريال (SAR)', 'المعادل بالجنيه (EGP)', 'البيان', 'الطرف الآخر', 'التاريخ', 'طريقة الدفع', 'حالة السحب'];
     const rows = filteredRecords.map(r => [
       r.id,
       r.type === 'revenue' ? 'إيراد' : 'مصروف',
       r.category,
+      r.currency === 'EGP' ? 'جنيه مصري' : 'ريال سعودي',
       r.amount,
-      Math.round(r.amount * exchangeRate),
+      Math.round(getRecordAmountSar(r)),
+      Math.round(getRecordAmountEgp(r)),
       `"${r.description}"`,
       `"${r.party_name || ''}"`,
       r.date,
@@ -264,6 +300,20 @@ export const FinancePage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => {
+              if (window.confirm('هل أنت تأكد من تصفير وحذف جميع القيود المالية والحسابات الحالية ليكون صافي الأرباح والإيرادات صفراً (0)؟')) {
+                financeRecords.forEach(r => deleteFinanceRecord(r.id));
+                toast.success('تم تصفير جميع الحسابات والقيود المالية بنجاح (جميع الأرباح والمصروفات الآن صفر)');
+              }
+            }}
+            className="px-3.5 py-2.5 text-xs font-extrabold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 rounded-2xl flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+            title="تصفير كافة الحسابات والقيود"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>تصفير الحسابات</span>
+          </button>
+
           <button
             onClick={() => setActivePage('closing')}
             className="px-4 py-2.5 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 rounded-2xl shadow-md flex items-center gap-2 transition-all active:scale-95"
@@ -466,6 +516,16 @@ export const FinancePage: React.FC = () => {
         </div>
       )}
 
+      {/* Empty Financial State Notice */}
+      {financeRecords.length === 0 && (
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 flex items-center justify-between text-xs font-bold">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+            <span>لم يتم إضافة أي حسابات أو قيود مالية حتى الآن. جميع الإيرادات والمصروفات والأرباح صفراً (0). يمكنك إضافة أول قيد مالي بالضغط على "إضافة قيد مالي جديد".</span>
+          </div>
+        </div>
+      )}
+
       {/* TAB 1: GENERAL LEDGER OVERVIEW */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
@@ -483,10 +543,10 @@ export const FinancePage: React.FC = () => {
               </div>
               <div className="mt-3">
                 <div className="text-2xl font-extrabold text-slate-900 dark:text-white">
-                  {formatDual(totalRevenue).primary}
+                  {currency === 'EGP' ? `${Math.round(totalRevenueEgp).toLocaleString('ar-EG')} ج.م` : `${Math.round(totalRevenueSar).toLocaleString('ar-EG')} ر.س`}
                 </div>
                 <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                  تساوي: {formatDual(totalRevenue).secondary}
+                  تساوي: {currency === 'EGP' ? `${Math.round(totalRevenueSar).toLocaleString('ar-EG')} ر.س` : `${Math.round(totalRevenueEgp).toLocaleString('ar-EG')} ج.م`}
                 </div>
               </div>
             </div>
@@ -501,10 +561,10 @@ export const FinancePage: React.FC = () => {
               </div>
               <div className="mt-3">
                 <div className="text-2xl font-extrabold text-slate-900 dark:text-white">
-                  {formatDual(totalExpense).primary}
+                  {currency === 'EGP' ? `${Math.round(totalExpenseEgp).toLocaleString('ar-EG')} ج.م` : `${Math.round(totalExpenseSar).toLocaleString('ar-EG')} ر.س`}
                 </div>
                 <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                  تساوي: {formatDual(totalExpense).secondary}
+                  تساوي: {currency === 'EGP' ? `${Math.round(totalExpenseSar).toLocaleString('ar-EG')} ر.س` : `${Math.round(totalExpenseEgp).toLocaleString('ar-EG')} ج.م`}
                 </div>
               </div>
             </div>
@@ -519,10 +579,10 @@ export const FinancePage: React.FC = () => {
               </div>
               <div className="mt-3">
                 <div className="text-2xl font-extrabold text-slate-900 dark:text-white">
-                  {formatDual(netProfit).primary}
+                  {currency === 'EGP' ? `${Math.round(netProfitEgp).toLocaleString('ar-EG')} ج.م` : `${Math.round(netProfitSar).toLocaleString('ar-EG')} ر.س`}
                 </div>
                 <div className="text-[11px] text-amber-600 dark:text-amber-400 font-bold mt-1">
-                  هامش الربح التشغيلي: {profitMargin}%
+                  تساوي: {currency === 'EGP' ? `${Math.round(netProfitSar).toLocaleString('ar-EG')} ر.س` : `${Math.round(netProfitEgp).toLocaleString('ar-EG')} ج.م`} | الهامش: {profitMargin}%
                 </div>
               </div>
             </div>
@@ -570,10 +630,10 @@ export const FinancePage: React.FC = () => {
                   <div>
                     <span className="text-xs text-slate-400 block font-bold">تكاليف الفنادق والسكن</span>
                     <span className="text-lg font-extrabold text-white font-cairo">
-                      {formatDual(hotelExpensesTotal).primary}
+                      {formatDual(hotelExpensesTotalSar).primary}
                     </span>
                     <span className="text-[10px] text-slate-400 block font-mono">
-                      ({formatDual(hotelExpensesTotal).secondary})
+                      ({formatDual(hotelExpensesTotalSar).secondary})
                     </span>
                   </div>
                 </div>
@@ -587,10 +647,10 @@ export const FinancePage: React.FC = () => {
                   <div>
                     <span className="text-xs text-slate-400 block font-bold">تكاليف الطيران والتذاكر</span>
                     <span className="text-lg font-extrabold text-white font-cairo">
-                      {formatDual(flightExpensesTotal).primary}
+                      {formatDual(flightExpensesTotalSar).primary}
                     </span>
                     <span className="text-[10px] text-slate-400 block font-mono">
-                      ({formatDual(flightExpensesTotal).secondary})
+                      ({formatDual(flightExpensesTotalSar).secondary})
                     </span>
                   </div>
                 </div>
@@ -604,10 +664,10 @@ export const FinancePage: React.FC = () => {
                   <div>
                     <span className="text-xs text-slate-400 block font-bold">تكاليف النقل والحافلات</span>
                     <span className="text-lg font-extrabold text-white font-cairo">
-                      {formatDual(transportExpensesTotal).primary}
+                      {formatDual(transportExpensesTotalSar).primary}
                     </span>
                     <span className="text-[10px] text-slate-400 block font-mono">
-                      ({formatDual(transportExpensesTotal).secondary})
+                      ({formatDual(transportExpensesTotalSar).secondary})
                     </span>
                   </div>
                 </div>
@@ -618,13 +678,13 @@ export const FinancePage: React.FC = () => {
           {/* Financial Ledger Records Table */}
           <div className="bg-white dark:bg-[#151c2d] rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-4">
             
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => setFilterType('all')}
                   className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all ${
                     filterType === 'all'
-                      ? 'bg-amber-500 text-slate-950 font-extrabold'
+                      ? 'bg-amber-500 text-slate-950 font-extrabold shadow-sm'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                   }`}
                 >
@@ -634,7 +694,7 @@ export const FinancePage: React.FC = () => {
                   onClick={() => setFilterType('revenue')}
                   className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all ${
                     filterType === 'revenue'
-                      ? 'bg-emerald-500 text-white font-extrabold'
+                      ? 'bg-emerald-500 text-white font-extrabold shadow-sm'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                   }`}
                 >
@@ -644,7 +704,7 @@ export const FinancePage: React.FC = () => {
                   onClick={() => setFilterType('expense')}
                   className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all ${
                     filterType === 'expense'
-                      ? 'bg-rose-500 text-white font-extrabold'
+                      ? 'bg-rose-500 text-white font-extrabold shadow-sm'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                   }`}
                 >
@@ -654,16 +714,54 @@ export const FinancePage: React.FC = () => {
                   onClick={() => setFilterType('withdrawn')}
                   className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all ${
                     filterType === 'withdrawn'
-                      ? 'bg-purple-600 text-white font-extrabold'
+                      ? 'bg-purple-600 text-white font-extrabold shadow-sm'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                   }`}
                 >
                   تسويات السحب/الإلغاء ({withdrawnRecords.length})
                 </button>
+
+                <div className="h-5 w-px bg-slate-200 dark:bg-slate-800 mx-1 hidden sm:block" />
+
+                {/* Currency Filter */}
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                  <button
+                    onClick={() => setFilterCurrency('all')}
+                    className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
+                      filterCurrency === 'all'
+                        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    الكل
+                  </button>
+                  <button
+                    onClick={() => setFilterCurrency('SAR')}
+                    className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+                      filterCurrency === 'SAR'
+                        ? 'bg-amber-500 text-slate-950 font-extrabold shadow-xs'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <span>🇸🇦</span>
+                    <span>ريال سعودي</span>
+                  </button>
+                  <button
+                    onClick={() => setFilterCurrency('EGP')}
+                    className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+                      filterCurrency === 'EGP'
+                        ? 'bg-amber-500 text-slate-950 font-extrabold shadow-xs'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <span>🇪🇬</span>
+                    <span>جنيه مصري</span>
+                  </button>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <div className="relative w-full sm:w-64">
+              <div className="flex items-center gap-2 w-full lg:w-auto">
+                <div className="relative w-full lg:w-64">
                   <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input
                     type="text"
@@ -693,8 +791,10 @@ export const FinancePage: React.FC = () => {
                     <th className="p-3.5">الفئة والمصرف</th>
                     <th className="p-3.5">البيان / الوصف</th>
                     <th className="p-3.5">الطرف الآخر (عميل / مورد)</th>
-                    <th className="p-3.5">المبلغ (ر.س)</th>
-                    <th className="p-3.5">المبلغ (ج.م)</th>
+                    <th className="p-3.5">العملة</th>
+                    <th className="p-3.5">المبلغ الأصلي</th>
+                    <th className="p-3.5">المعادل (ر.س)</th>
+                    <th className="p-3.5">المعادل (ج.م)</th>
                     <th className="p-3.5">طريقة الدفع</th>
                     <th className="p-3.5">التاريخ</th>
                     <th className="p-3.5">الحالة</th>
@@ -704,75 +804,93 @@ export const FinancePage: React.FC = () => {
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {filteredRecords.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="p-8 text-center text-slate-400">
+                      <td colSpan={13} className="p-8 text-center text-slate-400">
                         لا توجد قيود مالية مطابقة للبحث
                       </td>
                     </tr>
                   ) : (
-                    filteredRecords.map((record) => (
-                      <tr key={record.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-all">
-                        <td className="p-3.5 font-mono font-bold text-slate-700 dark:text-slate-300">
-                          {record.id}
-                        </td>
-                        <td className="p-3.5">
-                          {record.is_withdrawn || record.category === 'سحب وإلغاء' ? (
-                            <span className="px-2.5 py-1 text-[11px] font-extrabold bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-full border border-purple-500/20">
-                              سحب/إلغاء
+                    filteredRecords.map((record) => {
+                      const recSar = getRecordAmountSar(record);
+                      const recEgp = getRecordAmountEgp(record);
+                      const isEgp = record.currency === 'EGP';
+
+                      return (
+                        <tr key={record.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-all">
+                          <td className="p-3.5 font-mono font-bold text-slate-700 dark:text-slate-300">
+                            {record.id}
+                          </td>
+                          <td className="p-3.5">
+                            {record.is_withdrawn || record.category === 'سحب وإلغاء' ? (
+                              <span className="px-2.5 py-1 text-[11px] font-extrabold bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-full border border-purple-500/20">
+                                سحب/إلغاء
+                              </span>
+                            ) : record.type === 'revenue' ? (
+                              <span className="px-2.5 py-1 text-[11px] font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full border border-emerald-500/20">
+                                إيراد (+)
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 text-[11px] font-extrabold bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-full border border-rose-500/20">
+                                مصروف (-)
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3.5 font-bold text-slate-900 dark:text-slate-100">
+                            {record.category}
+                          </td>
+                          <td className="p-3.5 text-slate-600 dark:text-slate-300 max-w-xs truncate">
+                            {record.description}
+                            {record.invoice_number && (
+                              <span className="block text-[10px] text-slate-400 font-mono">
+                                فاتورة: {record.invoice_number}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3.5 font-medium text-slate-700 dark:text-slate-300">
+                            {record.party_name || '-'}
+                          </td>
+                          <td className="p-3.5">
+                            <span className={`px-2 py-0.5 text-[11px] font-black rounded-lg border ${
+                              isEgp
+                                ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20'
+                                : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20'
+                            }`}>
+                              {isEgp ? '🇪🇬 ج.م' : '🇸🇦 ر.س'}
                             </span>
-                          ) : record.type === 'revenue' ? (
-                            <span className="px-2.5 py-1 text-[11px] font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full border border-emerald-500/20">
-                              إيراد (+)
+                          </td>
+                          <td className="p-3.5 font-black text-sm text-slate-900 dark:text-white font-mono">
+                            {record.amount.toLocaleString('ar-EG')} {isEgp ? 'ج.م' : 'ر.س'}
+                          </td>
+                          <td className="p-3.5 font-bold text-xs text-slate-700 dark:text-slate-300 font-mono">
+                            {Math.round(recSar).toLocaleString('ar-EG')} ر.س
+                          </td>
+                          <td className="p-3.5 font-bold text-xs text-emerald-600 dark:text-emerald-400 font-mono">
+                            {Math.round(recEgp).toLocaleString('ar-EG')} ج.م
+                          </td>
+                          <td className="p-3.5 text-slate-500">
+                            {record.payment_method}
+                          </td>
+                          <td className="p-3.5 text-slate-500 font-mono text-[11px]">
+                            {record.date}
+                          </td>
+                          <td className="p-3.5">
+                            <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${
+                              record.status === 'مكتمل' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                            }`}>
+                              {record.status}
                             </span>
-                          ) : (
-                            <span className="px-2.5 py-1 text-[11px] font-extrabold bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-full border border-rose-500/20">
-                              مصروف (-)
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3.5 font-bold text-slate-900 dark:text-slate-100">
-                          {record.category}
-                        </td>
-                        <td className="p-3.5 text-slate-600 dark:text-slate-300 max-w-xs truncate">
-                          {record.description}
-                          {record.invoice_number && (
-                            <span className="block text-[10px] text-slate-400 font-mono">
-                              فاتورة: {record.invoice_number}
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3.5 font-medium text-slate-700 dark:text-slate-300">
-                          {record.party_name || '-'}
-                        </td>
-                        <td className="p-3.5 font-extrabold text-sm text-slate-900 dark:text-white">
-                          {record.amount.toLocaleString('ar-EG')} ر.س
-                        </td>
-                        <td className="p-3.5 font-extrabold text-sm text-emerald-600 dark:text-emerald-400 font-mono">
-                          {Math.round(record.amount * exchangeRate).toLocaleString('ar-EG')} ج.م
-                        </td>
-                        <td className="p-3.5 text-slate-500">
-                          {record.payment_method}
-                        </td>
-                        <td className="p-3.5 text-slate-500 font-mono text-[11px]">
-                          {record.date}
-                        </td>
-                        <td className="p-3.5">
-                          <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${
-                            record.status === 'مكتمل' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                          }`}>
-                            {record.status}
-                          </span>
-                        </td>
-                        <td className="p-3.5 text-center">
-                          <button
-                            onClick={() => deleteFinanceRecord(record.id)}
-                            className="p-1.5 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-500/10 transition-all"
-                            title="حذف القيد"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                          </td>
+                          <td className="p-3.5 text-center">
+                            <button
+                              onClick={() => deleteFinanceRecord(record.id)}
+                              className="p-1.5 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-500/10 transition-all"
+                              title="حذف القيد"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -830,10 +948,10 @@ export const FinancePage: React.FC = () => {
                       )}
                     </td>
                     <td className="p-3.5 font-extrabold text-slate-900 dark:text-white">
-                      {ag.estimatedRevenue.toLocaleString('ar-EG')} ر.س
+                      {ag.estimatedRevenueSar.toLocaleString('ar-EG')} ر.س
                     </td>
                     <td className="p-3.5 font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
-                      {Math.round(ag.estimatedRevenue * exchangeRate).toLocaleString('ar-EG')} ج.م
+                      {Math.round(ag.estimatedRevenueSar * exchangeRate).toLocaleString('ar-EG')} ج.م
                     </td>
                     <td className="p-3.5">
                       <span className="px-2.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 font-bold text-[10px]">
@@ -895,9 +1013,9 @@ export const FinancePage: React.FC = () => {
                 <DollarSign className="w-5 h-5 text-amber-500" />
               </div>
               <div className="mt-2 text-2xl font-extrabold font-cairo">
-                {formatDual(withdrawnTotalRefunds).primary}
+                {formatDual(withdrawnTotalRefundsSar).primary}
               </div>
-              <p className="text-[11px] opacity-80 mt-1">تساوي: {formatDual(withdrawnTotalRefunds).secondary}</p>
+              <p className="text-[11px] opacity-80 mt-1">تساوي: {formatDual(withdrawnTotalRefundsSar).secondary}</p>
             </div>
 
           </div>
@@ -1063,19 +1181,53 @@ export const FinancePage: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  المبلغ (بالريال السعودي)
+                  عملة السند
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewCurrency('SAR')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
+                      newCurrency === 'SAR'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500 font-black'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-transparent'
+                    }`}
+                  >
+                    <span>🇸🇦</span>
+                    <span>ريال سعودي (SAR)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewCurrency('EGP')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
+                      newCurrency === 'EGP'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500 font-black'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-transparent'
+                    }`}
+                  >
+                    <span>🇪🇬</span>
+                    <span>جنيه مصري (EGP)</span>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  المبلغ ({newCurrency === 'EGP' ? 'بالجنيه المصري' : 'بالريال السعودي'})
                 </label>
                 <input
                   type="number"
                   value={newAmount}
                   onChange={(e) => setNewAmount(e.target.value)}
-                  placeholder="مثال: 15000"
+                  placeholder={newCurrency === 'EGP' ? 'مثال: 120000' : 'مثال: 15000'}
                   required
-                  className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none"
+                  className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-xl border border-transparent focus:border-amber-500 focus:outline-none font-mono"
                 />
                 {newAmount && !isNaN(Number(newAmount)) && (
                   <span className="text-[11px] text-emerald-500 font-mono font-bold block mt-1">
-                    يعادل بالجنيه: {Math.round(Number(newAmount) * exchangeRate).toLocaleString('ar-EG')} ج.م
+                    {newCurrency === 'EGP'
+                      ? `يعادل بالريال السعودي: ${Math.round(Number(newAmount) / (exchangeRate || 1)).toLocaleString('ar-EG')} ر.س`
+                      : `يعادل بالجنيه المصري: ${Math.round(Number(newAmount) * exchangeRate).toLocaleString('ar-EG')} ج.م`}
                   </span>
                 )}
               </div>

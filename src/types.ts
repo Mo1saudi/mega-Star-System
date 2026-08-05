@@ -9,6 +9,7 @@ export interface Pilgrim {
   name: string;
   gender: Gender;
   passport_number: string;
+  passport_expiry_date?: string;
   agent_main: string;
   agent_sub: string;
   visa_status: VisaStatus;
@@ -19,6 +20,7 @@ export interface Pilgrim {
   room_type: RoomType;
   family_group_link?: string;
   trip_id: string;
+  transport_id?: string;
   notes?: string;
   needs_bed: boolean;
   room_number?: string;
@@ -44,11 +46,17 @@ export interface Trip {
   trip_name: string;
   route: string;
   airline: string;
+  passenger_count?: number;
   departure_date: string;
   departure_time: string;
+  arrival_time?: string;
+  flight_number_outbound?: string;
   return_date: string;
   return_time: string;
+  flight_number_inbound?: string;
+  return_route?: string;
   pnr: string;
+  status?: 'مؤكد' | 'مبدئي' | 'تحت الطلب';
 }
 
 export interface Rooming {
@@ -61,12 +69,25 @@ export interface Rooming {
   quad_rooms: number;
 }
 
+export interface StaffPermission {
+  canManagePilgrims: boolean;       // إدارة وتعديل سجلات المعتمرين
+  canManageTripsTransports: boolean;// إدارة رحلات الطيران والتفويج والحافلات
+  canManageRooming: boolean;        // إدارة التسكين والفنادق والافتراضي
+  canManageFinance: boolean;        // إدارة المالية والإيرادات والمصروفات
+  canManageStaff: boolean;          // إدارة الكادر والموظفين والإقامات
+  canCloseAccounting: boolean;      // إغلاق وتصفيات الفترات المحاسبية
+  canExportBackup: boolean;         // تصدير واسترجاع النسخ الاحتياطية
+  canViewReports: boolean;          // الاطلاع على التقارير الشاملة
+}
+
 export interface Staff {
   id: string;
   name: string;
   role: string;
   status: 'نشط' | 'غير نشط';
   phone: string;
+  national_id?: string;
+  permissions?: StaffPermission;
 }
 
 export interface Transport {
@@ -78,6 +99,22 @@ export interface Transport {
   to_location: string;
   vehicle_type: string;
   ground_supervisor: string;
+  
+  // Extended Dispatch & Transport properties
+  umrah_operating_number?: string;
+  trip_name?: string;
+  date?: string;
+  makkah_hotel?: string;
+  madinah_hotel?: string;
+  passenger_count?: number;
+  external_agent?: string;
+  supervisor?: string;
+  group_number?: string;
+  flight_number?: string;
+  airline_type?: string;
+  flight_time?: string;
+  return_details?: string;
+  rawdah_permit_time?: string;
 }
 
 export interface FamilyGroup {
@@ -115,13 +152,14 @@ export interface PreflightValidationResult {
   };
 }
 
-export type UserRole = 'admin' | 'manager' | 'operations' | 'finance' | 'supervisor' | 'viewer';
+export type UserRole = 'admin' | 'manager' | 'operations' | 'finance' | 'viewer';
 
 export interface FinanceRecord {
   id: string;
   type: 'revenue' | 'expense';
   category: string; // e.g. 'رسوم عمرة', 'حجز فنادق', 'تذاكر طيران', 'نقل حافلات', 'عمولات سماسرة', 'إعاشة وتغذية'
   amount: number;
+  currency?: 'EGP' | 'SAR';
   description: string;
   date: string;
   status: 'مكتمل' | 'معلق' | 'مسوى';
@@ -145,14 +183,31 @@ export interface DocumentRecord {
   file_url?: string;
 }
 
+export interface PendingUser {
+  id: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+  requestedAt: string;
+  status: 'pending' | 'approved' | 'rejected';
+  role?: string;
+  phone?: string;
+  national_id?: string;
+  permissions?: StaffPermission;
+  rejectionReason?: string;
+}
+
 export interface NotificationRecord {
   id: string;
   title: string;
   message: string;
-  type: 'flight' | 'document' | 'payment' | 'hotel' | 'transport';
+  type: 'flight' | 'document' | 'payment' | 'hotel' | 'transport' | 'passport_expiry' | 'visa_expiry' | 'iqama_expiry' | 'user_approval';
   date: string;
   read: boolean;
   severity: 'low' | 'medium' | 'high';
+  target_staff_id?: string;
+  target_entity_name?: string;
+  days_remaining?: number;
 }
 
 export interface AccountingClosingRecord {
@@ -178,6 +233,7 @@ export interface AppSnapshot {
   documents: DocumentRecord[];
   notifications: NotificationRecord[];
   closings: AccountingClosingRecord[];
+  pendingUsers?: PendingUser[];
   currentRole?: UserRole;
 }
 

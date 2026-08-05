@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../lib/store';
+import { CompanyLogo } from './CompanyLogo';
 import { Search, Undo2, Redo2, Hotel, Moon, Sun, RefreshCw, Download, Monitor, Shield, Cloud, CheckCircle2, Link2 } from 'lucide-react';
 import { ExeDownloadModal } from './ExeDownloadModal';
 import { AuthModal } from './AuthModal';
@@ -24,29 +25,35 @@ export const Topbar: React.FC = () => {
   const hotelOptions = Array.from(new Set(roomings.map(r => r.hotel_name)));
 
   const roleNames: Record<string, string> = {
-    admin: 'مدير النظام',
-    manager: 'مدير عمليات',
-    operations: 'إشراف تسكين',
-    finance: 'محاسب مالي',
-    supervisor: 'مشرف ميداني',
-    viewer: 'مشاهد فقط'
+    admin: 'مدير النظام (Full Admin)',
+    manager: 'مدير العمليات',
+    operations: 'موظف عمليات وتفويج',
+    finance: 'محاسب مالي معتمد',
+    viewer: 'مستعرض فقط (Read Only)'
   };
 
   return (
     <>
-      <header className="sticky top-0 z-20 bg-white/90 dark:bg-[#151c2d]/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-3 transition-colors">
+      <header className="sticky top-0 z-20 bg-white/90 dark:bg-[#151c2d]/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-2.5 transition-colors">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 max-w-7xl mx-auto">
           
-          {/* Search Bar */}
-          <div className="relative w-full sm:w-72">
-            <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="بحث بالاسم، الجواز، أو الرمز..."
-              className="w-full pr-10 pl-4 py-2 text-xs sm:text-sm bg-slate-100 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100 rounded-xl border border-transparent focus:border-amber-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-none transition-all"
-            />
+          {/* Mobile Company Logo & Search */}
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <div className="lg:hidden">
+              <CompanyLogo size="xs" showText={false} />
+            </div>
+
+            {/* Search Bar */}
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="بحث بالاسم، الجواز، أو الرمز..."
+                className="w-full pr-10 pl-4 py-2 text-xs sm:text-sm bg-slate-100 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100 rounded-xl border border-transparent focus:border-amber-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-none transition-all"
+              />
+            </div>
           </div>
 
           {/* Filters & Actions */}

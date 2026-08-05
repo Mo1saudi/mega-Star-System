@@ -49,7 +49,7 @@ export const AddPilgrimModal: React.FC<AddPilgrimModalProps> = ({
   const [agentMain, setAgentMain] = useState<string>('شركة ميجا ستار للسياحة');
   const [agentSub, setAgentSub] = useState<string>('فرع المبيعات المباشرة');
   const [selectedTripId, setSelectedTripId] = useState<string>(trips[0]?.id || 'TRIP-101');
-  const [tripNumber, setTripNumber] = useState<string>('2525147');
+  const [tripNumber, setTripNumber] = useState<string>('');
   const [groupNumber, setGroupNumber] = useState<string>('101');
   
   // Accommodation Selections
@@ -319,6 +319,7 @@ export const AddPilgrimModal: React.FC<AddPilgrimModalProps> = ({
       id: `PIL-ADD-${Date.now().toString().slice(-4)}-${idx}`,
       name: item.name.trim(),
       passport_number: item.passport_number.trim(),
+      passport_expiry_date: item.expiry_date || undefined,
       gender: item.gender,
       agent_main: item.agent_main || agentMain || 'شركة ميجا ستار للسياحة',
       agent_sub: item.agent_sub || agentSub || 'فرع المبيعات المباشرة',
@@ -331,7 +332,7 @@ export const AddPilgrimModal: React.FC<AddPilgrimModalProps> = ({
       room_type: item.room_type || roomType,
       room_spec: roomSpec || undefined,
       trip_id: selectedTripId,
-      trip_number: tripNumber || selectedTripObj?.pnr || '2525147',
+      trip_number: tripNumber || selectedTripObj?.pnr || '',
       group_number: groupNumber,
       family_group_link: familyLinkId,
       needs_bed: true,
@@ -713,6 +714,19 @@ export const AddPilgrimModal: React.FC<AddPilgrimModalProps> = ({
                       <option value="ذكر">ذكر</option>
                       <option value="أنثى">أنثى</option>
                     </select>
+                  </div>
+
+                  {/* Passport Expiry Date */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                      تاريخ انتهاء الجواز
+                    </label>
+                    <input
+                      type="date"
+                      value={item.expiry_date || ''}
+                      onChange={(e) => handleUpdateItem(item.id, { expiry_date: e.target.value })}
+                      className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white rounded-xl border border-slate-200 dark:border-slate-700 focus:border-amber-500 focus:outline-none font-mono"
+                    />
                   </div>
 
                   {/* Nationality */}

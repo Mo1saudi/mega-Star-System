@@ -2,11 +2,57 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { 
   Pilgrim, Trip, Rooming, Staff, Transport, FamilyGroup, 
   AppSnapshot, FamilyValidationResult, PreflightValidationResult,
-  FinanceRecord, DocumentRecord, NotificationRecord, AccountingClosingRecord, UserRole, RoomType
+  FinanceRecord, DocumentRecord, NotificationRecord, AccountingClosingRecord, UserRole, RoomType,
+  PendingUser, StaffPermission
 } from '../types';
+
+export const getDefaultPermissionsForRole = (role: string): StaffPermission => {
+  const r = role.toLowerCase();
+  if (r.includes('مدير') || r.includes('عام') || r.includes('admin')) {
+    return {
+      canManagePilgrims: true,
+      canManageTripsTransports: true,
+      canManageRooming: true,
+      canManageFinance: true,
+      canManageStaff: true,
+      canCloseAccounting: true,
+      canExportBackup: true,
+      canViewReports: true
+    };
+  }
+  if (r.includes('محاسب') || r.includes('مالي') || r.includes('finance')) {
+    return {
+      canManagePilgrims: false,
+      canManageTripsTransports: false,
+      canManageRooming: false,
+      canManageFinance: true,
+      canManageStaff: false,
+      canCloseAccounting: true,
+      canExportBackup: true,
+      canViewReports: true
+    };
+  }
+  return {
+    canManagePilgrims: true,
+    canManageTripsTransports: true,
+    canManageRooming: true,
+    canManageFinance: false,
+    canManageStaff: false,
+    canCloseAccounting: false,
+    canExportBackup: false,
+    canViewReports: true
+  };
+};
 import { getLocalDatabaseStore, saveLocalDatabaseStore, getSeedSnapshot } from './desktop-store';
 import { initGoogleAuth, googleSignIn, getGoogleAccessToken, logoutGoogle } from './google-auth';
 import { toast } from 'sonner';
+
+export const isPilgrimWithdrawn = (p: Pilgrim): boolean => {
+  if (!p) return false;
+  if (p.is_withdrawn) return true;
+  const text = `${p.withdrawal_status || ''} ${p.notes || ''} ${p.program || ''} ${p.visa_type || ''}`;
+  return /سحب|إلغاء|الغاء|ملغي|مسحوب|استبعاد|مستبعد|اعتذار/i.test(text);
+};
 
 interface StoreContextType {
   // Google Sheets OAuth & Sync
@@ -14,6 +60,21 @@ interface StoreContextType {
   googleUserEmail: string | null;
   handleGoogleSignIn: () => Promise<void>;
   handleGoogleLogout: () => Promise<void>;
+
+  // Google User Auth & Admin Approval System
+  pendingUsers: PendingUser[];
+  currentUser: {
+    email: string;
+    displayName: string;
+    photoURL?: string;
+    role?: string;
+    status: 'approved' | 'pending' | 'rejected' | 'admin';
+  } | null;
+  approvePendingUser: (id: string, role: string, phone?: string, national_id?: string, permissions?: StaffPermission) => void;
+  rejectPendingUser: (id: string, reason?: string) => void;
+  loginWithGoogle: () => Promise<void>;
+  logoutCurrentUser: () => Promise<void>;
+  loginAsAdminBypass: () => void;
 
   // Currency Settings
   currency: 'SAR' | 'EGP';
@@ -81,6 +142,8 @@ interface StoreContextType {
   deleteFamilyGroup: (id: string) => void;
   unlinkFamilyMemberAndRedistribute: (pilgrimId: string) => void;
   deleteFamilyGroupAndRedistribute: (groupId: string) => void;
+  transferFamilyMember: (pilgrimId: string, sourceGroupId: string, targetGroupId: string | 'new_group', defaultNewGroupName?: string) => void;
+  deduplicateFamilyGroups: () => void;
 
   // Finance Operations
   financeRecords: FinanceRecord[];
@@ -97,6 +160,8 @@ interface StoreContextType {
   notifications: NotificationRecord[];
   markNotificationRead: (id: string) => void;
   addNotification: (notif: Omit<NotificationRecord, 'id'>) => void;
+  scanAndGenerateSmartAlerts: () => { createdCount: number };
+  sendDirectAlertToStaff: (staffId: string, title: string, message: string) => void;
 
   // Accounting Closing Operations
   closings: AccountingClosingRecord[];
@@ -109,6 +174,7 @@ interface StoreContextType {
   // Smart AI & Engine Features
   autoRooming: (hotelName: string, city: 'مكة' | 'المدينة') => void;
   validateFamilyGroups: () => FamilyValidationResult[];
+  generateNumberedFamilyLinks: () => void;
   validatePreflight: (hotelName?: string) => PreflightValidationResult;
   syncFromGoogleSheets: () => Promise<void>;
   appendPilgrimToSheet: (pilgrim: Pilgrim) => Promise<{ success: boolean; message: string }>;
@@ -117,6 +183,7 @@ interface StoreContextType {
   generateFinancialInsights: (financeData: any) => Promise<string>;
   generateAiErrorDetection: (pilgrims: Pilgrim[], roomings: Rooming[]) => Promise<string>;
   resetToDefaultSeed: () => void;
+  restoreFullBackup: (importedData: Partial<AppSnapshot>) => void;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
@@ -132,13 +199,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [activePage, setActivePage] = useState<string>('dashboard');
-  const [currency, setCurrency] = useState<'SAR' | 'EGP'>('SAR');
+  const [currency, setCurrency] = useState<'SAR' | 'EGP'>('EGP');
   const [exchangeRate, setExchangeRate] = useState<number>(13.5); // 1 SAR = 13.5 EGP
   const [isLoaded, setIsLoaded] = useState(false);
 
   // Google OAuth & Two-Way Sync State
   const [isGoogleConnected, setIsGoogleConnected] = useState(false);
   const [googleUserEmail, setGoogleUserEmail] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<{
+    email: string;
+    displayName: string;
+    photoURL?: string;
+    role?: string;
+    status: 'approved' | 'pending' | 'rejected' | 'admin';
+  } | null>(null);
 
   useEffect(() => {
     const unsub = initGoogleAuth(
@@ -436,12 +510,28 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     toast.success('تم تحديث بيانات الموظف');
   }, [snapshot, commitChange]);
 
+  const bulkUpdateStaff = useCallback((ids: string[], updates: Partial<Staff>) => {
+    commitChange({
+      ...snapshot,
+      staff: snapshot.staff.map(s => ids.includes(s.id) ? { ...s, ...updates } : s)
+    });
+    toast.success(`تم تحديث بيانات (${ids.length}) موظف بنجاح`);
+  }, [snapshot, commitChange]);
+
   const deleteStaff = useCallback((id: string) => {
     commitChange({
       ...snapshot,
       staff: snapshot.staff.filter(s => s.id !== id)
     });
     toast.success('تم حذف الموظف');
+  }, [snapshot, commitChange]);
+
+  const bulkDeleteStaff = useCallback((ids: string[]) => {
+    commitChange({
+      ...snapshot,
+      staff: snapshot.staff.filter(s => !ids.includes(s.id))
+    });
+    toast.success(`تم حذف (${ids.length}) موظف بنجاح`);
   }, [snapshot, commitChange]);
 
   const toggleStaffStatus = useCallback((id: string) => {
@@ -489,15 +579,57 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Family Group Operations
   const addFamilyGroup = useCallback((groupData: Omit<FamilyGroup, 'id'>) => {
-    const newGroup: FamilyGroup = {
-      ...groupData,
-      id: `FAM-${Date.now().toString().slice(-4)}`
-    };
-    commitChange({
-      ...snapshot,
-      familyGroups: [...snapshot.familyGroups, newGroup]
-    });
-    toast.success(`تم إنشاء المجموعة العائلية: ${groupData.group_name}`);
+    // Check if any selected pilgrim is withdrawn/canceled
+    const withdrawnPilgrim = groupData.pilgrim_ids
+      .map(id => snapshot.pilgrims.find(p => p.id === id))
+      .find(p => p && isPilgrimWithdrawn(p));
+
+    if (withdrawnPilgrim) {
+      toast.error(`المعتمر (${withdrawnPilgrim.name}) ملغي/مستبعد؛ لا يمكن ربطه عائلياً`);
+      return;
+    }
+
+    const trimmedName = groupData.group_name.trim();
+    const existingIndex = snapshot.familyGroups.findIndex(
+      fg => fg.group_name.trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+
+    if (existingIndex !== -1) {
+      const existing = snapshot.familyGroups[existingIndex];
+      const mergedPilgrimIds = Array.from(new Set([...existing.pilgrim_ids, ...groupData.pilgrim_ids]));
+      const updatedGroups = snapshot.familyGroups.map((fg, idx) => 
+        idx === existingIndex ? { ...fg, pilgrim_ids: mergedPilgrimIds, notes: groupData.notes ? `${fg.notes || ''} | ${groupData.notes}` : fg.notes } : fg
+      );
+      
+      const updatedPilgrims = snapshot.pilgrims.map(p => 
+        groupData.pilgrim_ids.includes(p.id) ? { ...p, family_group_link: existing.id } : p
+      );
+
+      commitChange({
+        ...snapshot,
+        familyGroups: updatedGroups,
+        pilgrims: updatedPilgrims
+      });
+      toast.info(`تم دمج المعتمرين في المجموعة العائلية الموجودة سابقاً: (${existing.group_name})`);
+    } else {
+      const newGroupId = `FAM-${Date.now().toString().slice(-4)}`;
+      const newGroup: FamilyGroup = {
+        ...groupData,
+        group_name: trimmedName,
+        id: newGroupId
+      };
+
+      const updatedPilgrims = snapshot.pilgrims.map(p => 
+        groupData.pilgrim_ids.includes(p.id) ? { ...p, family_group_link: newGroupId } : p
+      );
+
+      commitChange({
+        ...snapshot,
+        familyGroups: [...snapshot.familyGroups, newGroup],
+        pilgrims: updatedPilgrims
+      });
+      toast.success(`تم إنشاء المجموعة العائلية: ${trimmedName}`);
+    }
   }, [snapshot, commitChange]);
 
   const updateFamilyGroup = useCallback((id: string, updates: Partial<FamilyGroup>) => {
@@ -514,6 +646,235 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       familyGroups: snapshot.familyGroups.filter(fg => fg.id !== id)
     });
     toast.success('تم حذف الرابط العائلي');
+  }, [snapshot, commitChange]);
+
+  // Atomic transfer of a pilgrim between family groups or to a new family group
+  const transferFamilyMember = useCallback((
+    pilgrimId: string, 
+    sourceGroupId: string, 
+    targetGroupId: string | 'new_group',
+    defaultNewGroupName?: string
+  ) => {
+    const pilgrim = snapshot.pilgrims.find(p => p.id === pilgrimId);
+    if (!pilgrim) return;
+
+    if (isPilgrimWithdrawn(pilgrim)) {
+      toast.error(`المعتمر (${pilgrim.name}) ملغي/مستبعد؛ لا يمكن نقل ربطه العائلي`);
+      return;
+    }
+
+    let nextFamilyGroups = [...snapshot.familyGroups];
+    let nextPilgrims = [...snapshot.pilgrims];
+
+    if (targetGroupId === 'new_group') {
+      const newGroupId = `FAM-${Date.now().toString().slice(-4)}`;
+      const newGroupName = defaultNewGroupName || `عائلة المعتمر (${pilgrim.name})`;
+      
+      const newGroup: FamilyGroup = {
+        id: newGroupId,
+        group_name: newGroupName,
+        pilgrim_ids: [pilgrimId],
+        notes: 'مجموعة عائلية منشأة بالنقل'
+      };
+
+      // Remove pilgrim from source group
+      nextFamilyGroups = nextFamilyGroups.map(fg => {
+        if (fg.id === sourceGroupId) {
+          return { ...fg, pilgrim_ids: fg.pilgrim_ids.filter(id => id !== pilgrimId) };
+        }
+        return fg;
+      });
+
+      nextFamilyGroups.push(newGroup);
+
+      nextPilgrims = nextPilgrims.map(p => {
+        if (p.id === pilgrimId) {
+          return { ...p, family_group_link: newGroupId };
+        }
+        return p;
+      });
+
+      toast.success(`تم نقل المعتمر (${pilgrim.name}) إلى مجموعة عائلية جديدة (${newGroupName})`);
+    } else {
+      const targetGroup = nextFamilyGroups.find(g => g.id === targetGroupId);
+      if (!targetGroup) return;
+
+      nextFamilyGroups = nextFamilyGroups.map(fg => {
+        if (fg.id === sourceGroupId) {
+          return { ...fg, pilgrim_ids: fg.pilgrim_ids.filter(id => id !== pilgrimId) };
+        }
+        if (fg.id === targetGroupId) {
+          return { ...fg, pilgrim_ids: Array.from(new Set([...fg.pilgrim_ids, pilgrimId])) };
+        }
+        return fg;
+      });
+
+      nextPilgrims = nextPilgrims.map(p => {
+        if (p.id === pilgrimId) {
+          return { ...p, family_group_link: targetGroupId };
+        }
+        return p;
+      });
+
+      toast.success(`تم نقل المعتمر (${pilgrim.name}) إلى عائلة (${targetGroup.group_name}) بنجاح`);
+    }
+
+    commitChange({
+      ...snapshot,
+      familyGroups: nextFamilyGroups,
+      pilgrims: nextPilgrims
+    });
+  }, [snapshot, commitChange]);
+
+  // Merge & Deduplicate Family Groups with duplicate names
+  const deduplicateFamilyGroups = useCallback(() => {
+    const groupsByName = new Map<string, FamilyGroup[]>();
+
+    snapshot.familyGroups.forEach(fg => {
+      const normName = fg.group_name.trim().replace(/\s+/g, ' ').toLowerCase();
+      if (!groupsByName.has(normName)) groupsByName.set(normName, []);
+      groupsByName.get(normName)!.push(fg);
+    });
+
+    let duplicateCount = 0;
+    const finalGroups: FamilyGroup[] = [];
+    const idRemap = new Map<string, string>(); // oldId -> newPrimaryId
+
+    groupsByName.forEach((groups) => {
+      if (groups.length === 1) {
+        finalGroups.push(groups[0]);
+      } else {
+        duplicateCount += groups.length - 1;
+        const primary = groups[0];
+        const allPilgrimIds = new Set<string>(primary.pilgrim_ids);
+
+        for (let i = 1; i < groups.length; i++) {
+          const secondary = groups[i];
+          idRemap.set(secondary.id, primary.id);
+          secondary.pilgrim_ids.forEach(pid => allPilgrimIds.add(pid));
+        }
+
+        finalGroups.push({
+          ...primary,
+          pilgrim_ids: Array.from(allPilgrimIds)
+        });
+      }
+    });
+
+    if (duplicateCount === 0) {
+      toast.info('لا توجد عائلات مكررة بنفس الاسم، السجل نظيف تماماً');
+      return;
+    }
+
+    // Remap pilgrims family_group_link
+    const nextPilgrims = snapshot.pilgrims.map(p => {
+      if (p.family_group_link && idRemap.has(p.family_group_link)) {
+        return {
+          ...p,
+          family_group_link: idRemap.get(p.family_group_link)!
+        };
+      }
+      return p;
+    });
+
+    // Ensure all pilgrims in final groups have correct family_group_link
+    finalGroups.forEach(fg => {
+      fg.pilgrim_ids.forEach(pid => {
+        const pIdx = nextPilgrims.findIndex(p => p.id === pid);
+        if (pIdx !== -1 && (!nextPilgrims[pIdx].family_group_link || idRemap.has(nextPilgrims[pIdx].family_group_link!))) {
+          nextPilgrims[pIdx] = { ...nextPilgrims[pIdx], family_group_link: fg.id };
+        }
+      });
+    });
+
+    commitChange({
+      ...snapshot,
+      familyGroups: finalGroups,
+      pilgrims: nextPilgrims
+    });
+
+    toast.success(`تم دمج وإزالة (${duplicateCount}) مجموعة عائلية مكررة بنجاح`);
+  }, [snapshot, commitChange]);
+
+  // Generate Numbered Family Links ("رابط رقم 1", "رابط رقم 2", ...) for unlinked pilgrims grouped strictly by Hotel AND Gender
+  const generateNumberedFamilyLinks = useCallback(() => {
+    let nextPilgrims = [...snapshot.pilgrims];
+    let nextFamilyGroups = [...snapshot.familyGroups];
+
+    const activeGroupIds = new Set(nextFamilyGroups.map(fg => fg.id));
+    const unlinkedActive = nextPilgrims.filter(p => !isPilgrimWithdrawn(p) && (!p.family_group_link || !activeGroupIds.has(p.family_group_link)));
+
+    if (unlinkedActive.length === 0) {
+      toast.info('جميع المعتمرين المسجلين مرتبطون بالفعل بـ روابط عائلية أو رقمية.');
+      return;
+    }
+
+    // Group unlinked pilgrims by (Hotel + Gender) to strictly avoid cross-hotel or mixed-gender conflicts
+    const hotelGenderGroups = new Map<string, Pilgrim[]>();
+
+    unlinkedActive.forEach(p => {
+      const hotelKey = p.makkah_hotel || p.madinah_hotel || 'فندق مكة';
+      const groupKey = `${hotelKey}___${p.gender}`;
+
+      if (!hotelGenderGroups.has(groupKey)) {
+        hotelGenderGroups.set(groupKey, []);
+      }
+      hotelGenderGroups.get(groupKey)!.push(p);
+    });
+
+    let linkNumber = 1;
+
+    const existingNumMatches = nextFamilyGroups
+      .map(fg => fg.group_name.match(/رابط رقم (\d+)/))
+      .filter(Boolean);
+    if (existingNumMatches.length > 0) {
+      const maxNum = Math.max(...existingNumMatches.map(m => parseInt(m![1], 10)));
+      if (!isNaN(maxNum) && maxNum >= 1) {
+        linkNumber = maxNum + 1;
+      }
+    }
+
+    let createdGroupsCount = 0;
+
+    hotelGenderGroups.forEach((pilgrimList, groupKey) => {
+      const [hotelName, gender] = groupKey.split('___');
+      const genderLabel = gender === 'ذكر' ? 'رجال' : 'سيدات';
+      const chunkSize = 4;
+
+      for (let i = 0; i < pilgrimList.length; i += chunkSize) {
+        const chunk = pilgrimList.slice(i, i + chunkSize);
+        const linkId = `FAM-NUM-${Date.now()}-${linkNumber}`;
+        const linkName = `رابط رقم ${linkNumber}`;
+
+        const newGroup: FamilyGroup = {
+          id: linkId,
+          group_name: linkName,
+          pilgrim_ids: chunk.map(p => p.id),
+          notes: `رابط رقم ${linkNumber} - ${hotelName} (${genderLabel})`
+        };
+
+        nextFamilyGroups.push(newGroup);
+
+        const chunkIds = new Set(chunk.map(p => p.id));
+        nextPilgrims = nextPilgrims.map(p => {
+          if (chunkIds.has(p.id)) {
+            return { ...p, family_group_link: linkId };
+          }
+          return p;
+        });
+
+        linkNumber++;
+        createdGroupsCount++;
+      }
+    });
+
+    commitChange({
+      ...snapshot,
+      familyGroups: nextFamilyGroups,
+      pilgrims: nextPilgrims
+    });
+
+    toast.success(`تم إنشاء ${createdGroupsCount} رابط رقمي موزع على أساس الفندق والجنس (${unlinkedActive.length} معتمر) لعدم التعارض بنجاح`);
   }, [snapshot, commitChange]);
 
   // Unlink a pilgrim from their family link and automatically redistribute them into a suitable same-gender room or new room
@@ -704,13 +1065,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     toast.success(`تم حذف الرابط العائلي (${group.group_name}) وتوزيع جميع أفراده تلقائياً في غرف جديدة حسب الجنس`);
   }, [snapshot, commitChange]);
 
-  // Smart Auto-Rooming Engine (Clusters family links, marital pairs, merged notes, and room specs from sheet)
+  // Smart Auto-Rooming Engine (Strictly matches family links and distributes unlinked pilgrims by room specs & same gender; excludes withdrawn/canceled)
   const autoRooming = useCallback((hotelName: string, city: 'مكة' | 'المدينة') => {
     const hotelKey = city === 'مكة' ? 'makkah_hotel' : 'madinah_hotel';
-    const hotelPilgrims = snapshot.pilgrims.filter(p => p[hotelKey] === hotelName);
+    const allHotelPilgrims = snapshot.pilgrims.filter(p => p[hotelKey] === hotelName);
+
+    const hotelPilgrims = allHotelPilgrims.filter(p => !isPilgrimWithdrawn(p));
+    const withdrawnPilgrimsInHotel = allHotelPilgrims.filter(p => isPilgrimWithdrawn(p));
 
     if (hotelPilgrims.length === 0) {
-      toast.warning(`لا يوجد معتمرون مسجلون في ${hotelName}`);
+      toast.warning(`لا يوجد معتمرون نشطون للتسكين في ${hotelName}`);
       return;
     }
 
@@ -718,18 +1082,32 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const updatedPilgrimsMap = new Map<string, Pilgrim>();
     const assignedIds = new Set<string>();
 
-    // 1. Cluster by Family Link & Merged Cell Notes (أزواج / إخوة / عائلات / ملاحظات الشيت المدمجة)
+    // Un-assign any withdrawn/canceled pilgrims from rooms
+    withdrawnPilgrimsInHotel.forEach(p => {
+      if (p.room_number) {
+        updatedPilgrimsMap.set(p.id, { ...p, room_number: '' });
+      }
+    });
+
+    // -------------------------------------------------------------
+    // STEP 1: Cluster by Family Links & Merged Notes (تسكين مطابق للروابط العائلية 100%)
+    // -------------------------------------------------------------
     const familyClusterMap = new Map<string, Pilgrim[]>();
 
     hotelPilgrims.forEach(p => {
-      // Determine cluster key from family link, merged notes, or room spec notes
       let famKey = p.family_group_link || null;
 
+      // Find if pilgrim is part of an explicit FamilyGroup
+      if (!famKey) {
+        const fg = snapshot.familyGroups.find(g => g.pilgrim_ids.includes(p.id));
+        if (fg) famKey = fg.id;
+      }
+
+      // Check for merged relational notes if no explicit link exists
       if (!famKey && p.notes) {
         const cleanNotes = p.notes.trim();
-        // Check for relational keywords in merged cell notes
         if (/زوج|زوجة|زوجين|أزواج|اخوات|إخوة|اخوان|بنات|أبناء|اسره|أسرة|عائلة|عائله|مع بعض|أصحاب|اصحاب/i.test(cleanNotes)) {
-          famKey = cleanNotes;
+          famKey = `NOTE_FAM_${cleanNotes.toLowerCase()}`;
         }
       }
 
@@ -739,75 +1117,31 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     });
 
-    // Assign Family Clusters & Couples to dedicated rooms according to room spec or size
+    // House Family Groups into contiguous rooms together
     familyClusterMap.forEach((members) => {
-      if (members.length > 0) {
-        const unassignedMembers = members.filter(m => !assignedIds.has(m.id));
-        if (unassignedMembers.length === 0) return;
+      const unassignedMembers = members.filter(m => !assignedIds.has(m.id));
+      if (unassignedMembers.length === 0) return;
 
-        let index = 0;
-        while (index < unassignedMembers.length) {
-          const remainingCount = unassignedMembers.length - index;
-
-          // Check if members specify a target room spec ('ثنائي', 'ثلاثي', 'رباعي', 'فردي')
-          const firstSpec = unassignedMembers[index].room_spec || unassignedMembers[index].room_type;
-          let targetCapacity = 4; // Default Quad
-
-          if (firstSpec === 'ثنائي' || (remainingCount === 2 && /زوج|زوجة|زوجين|أزواج/i.test(unassignedMembers[index].notes || ''))) {
-            targetCapacity = 2;
-          } else if (firstSpec === 'ثلاثي' || remainingCount === 3) {
-            targetCapacity = 3;
-          } else if (firstSpec === 'فردي' || remainingCount === 1) {
-            targetCapacity = 1;
-          } else {
-            targetCapacity = Math.min(4, remainingCount);
-          }
-
-          const roomPilgrims = unassignedMembers.slice(index, index + targetCapacity);
-          const currentRoomNumber = `${roomNumberCounter}`;
-          const roomTypeStr: RoomType = roomPilgrims.length === 1 ? 'فردي' : roomPilgrims.length === 2 ? 'ثنائي' : roomPilgrims.length === 3 ? 'ثلاثي' : 'رباعي';
-
-          roomPilgrims.forEach(p => {
-            assignedIds.add(p.id);
-            updatedPilgrimsMap.set(p.id, {
-              ...p,
-              room_number: currentRoomNumber,
-              room_type: roomTypeStr
-            });
-          });
-
-          index += roomPilgrims.length;
-          roomNumberCounter++;
-        }
-      }
-    });
-
-    // 2. Separate remaining unassigned males and females (Strict Non-Mahram separation for singles)
-    const unassignedMales = hotelPilgrims.filter(p => !assignedIds.has(p.id) && p.gender === 'ذكر');
-    const unassignedFemales = hotelPilgrims.filter(p => !assignedIds.has(p.id) && p.gender === 'أنثى');
-
-    const assignClusterToRooms = (pilgrimList: Pilgrim[]) => {
       let index = 0;
-      while (index < pilgrimList.length) {
-        const remaining = pilgrimList.length - index;
+      while (index < unassignedMembers.length) {
+        const remainingCount = unassignedMembers.length - index;
+        const firstSpec = unassignedMembers[index].room_spec || unassignedMembers[index].room_type;
 
-        // Check preferred room_spec for current pilgrim
-        const preferredSpec = pilgrimList[index].room_spec;
-        let roomCap = 4; // Default Quad
-        if (preferredSpec === 'ثنائي') roomCap = 2;
-        else if (preferredSpec === 'ثلاثي') roomCap = 3;
-        else if (preferredSpec === 'فردي') roomCap = 1;
-        else {
-          if (remaining === 3) roomCap = 3;
-          else if (remaining === 2) roomCap = 2;
-          else if (remaining === 1 && index > 0) roomCap = 1;
-          else roomCap = Math.min(4, remaining);
+        let targetCapacity = 4; // Default Quad
+
+        if (firstSpec === 'ثنائي' || (remainingCount === 2 && /زوج|زوجة|زوجين|أزواج/i.test(unassignedMembers[index].notes || ''))) {
+          targetCapacity = 2;
+        } else if (firstSpec === 'ثلاثي' || remainingCount === 3) {
+          targetCapacity = 3;
+        } else if (firstSpec === 'فردي' || remainingCount === 1) {
+          targetCapacity = 1;
+        } else {
+          targetCapacity = Math.min(4, remainingCount);
         }
 
+        const roomPilgrims = unassignedMembers.slice(index, index + targetCapacity);
         const currentRoomNumber = `${roomNumberCounter}`;
-        const roomPilgrims = pilgrimList.slice(index, index + roomCap);
-
-        let roomTypeStr: RoomType = roomPilgrims.length === 1 ? 'فردي' : roomPilgrims.length === 2 ? 'ثنائي' : roomPilgrims.length === 3 ? 'ثلاثي' : 'رباعي';
+        const roomTypeStr: RoomType = roomPilgrims.length === 1 ? 'فردي' : roomPilgrims.length === 2 ? 'ثنائي' : roomPilgrims.length === 3 ? 'ثلاثي' : 'رباعي';
 
         roomPilgrims.forEach(p => {
           assignedIds.add(p.id);
@@ -821,10 +1155,111 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         index += roomPilgrims.length;
         roomNumberCounter++;
       }
+    });
+
+    // -------------------------------------------------------------
+    // STEP 2: Distribute Unlinked Pilgrims Individually (توزيع فردي حسب نوع الغرفة والمحتوى)
+    // -------------------------------------------------------------
+    const unlinkedPilgrims = hotelPilgrims.filter(p => !assignedIds.has(p.id));
+    const unlinkedMales = unlinkedPilgrims.filter(p => p.gender === 'ذكر');
+    const unlinkedFemales = unlinkedPilgrims.filter(p => p.gender === 'أنثى');
+
+    // Helper to distribute unlinked same-gender pilgrims into rooms matching their room_spec or room capacity
+    const distributeUnlinkedGroup = (pilgrimsList: Pilgrim[]) => {
+      if (pilgrimsList.length === 0) return;
+
+      // Classify unlinked pilgrims by room preference/spec
+      const doublePilgrims: Pilgrim[] = [];
+      const triplePilgrims: Pilgrim[] = [];
+      const quadPilgrims: Pilgrim[] = [];
+      const singlePilgrims: Pilgrim[] = [];
+      const flexiblePilgrims: Pilgrim[] = [];
+
+      pilgrimsList.forEach(p => {
+        const spec = p.room_spec || p.room_type;
+        if (spec === 'ثنائي') doublePilgrims.push(p);
+        else if (spec === 'ثلاثي') triplePilgrims.push(p);
+        else if (spec === 'رباعي') quadPilgrims.push(p);
+        else if (spec === 'فردي') singlePilgrims.push(p);
+        else flexiblePilgrims.push(p);
+      });
+
+      // 1. Assign Single Rooms (فردي)
+      singlePilgrims.forEach(p => {
+        const rmNo = `${roomNumberCounter}`;
+        assignedIds.add(p.id);
+        updatedPilgrimsMap.set(p.id, { ...p, room_number: rmNo, room_type: 'فردي' });
+        roomNumberCounter++;
+      });
+
+      // 2. Assign Double Rooms (ثنائي)
+      let idxD = 0;
+      while (idxD < doublePilgrims.length) {
+        const roomPilgrims = doublePilgrims.slice(idxD, idxD + 2);
+        const rmNo = `${roomNumberCounter}`;
+        const rmType: RoomType = roomPilgrims.length === 1 ? 'فردي' : 'ثنائي';
+        roomPilgrims.forEach(p => {
+          assignedIds.add(p.id);
+          updatedPilgrimsMap.set(p.id, { ...p, room_number: rmNo, room_type: rmType });
+        });
+        idxD += roomPilgrims.length;
+        roomNumberCounter++;
+      }
+
+      // 3. Assign Triple Rooms (ثلاثي)
+      let idxT = 0;
+      while (idxT < triplePilgrims.length) {
+        const roomPilgrims = triplePilgrims.slice(idxT, idxT + 3);
+        const rmNo = `${roomNumberCounter}`;
+        const rmType: RoomType = roomPilgrims.length === 1 ? 'فردي' : roomPilgrims.length === 2 ? 'ثنائي' : 'ثلاثي';
+        roomPilgrims.forEach(p => {
+          assignedIds.add(p.id);
+          updatedPilgrimsMap.set(p.id, { ...p, room_number: rmNo, room_type: rmType });
+        });
+        idxT += roomPilgrims.length;
+        roomNumberCounter++;
+      }
+
+      // 4. Assign Quad Rooms (رباعي)
+      let idxQ = 0;
+      while (idxQ < quadPilgrims.length) {
+        const roomPilgrims = quadPilgrims.slice(idxQ, idxQ + 4);
+        const rmNo = `${roomNumberCounter}`;
+        const rmType: RoomType = roomPilgrims.length === 1 ? 'فردي' : roomPilgrims.length === 2 ? 'ثنائي' : roomPilgrims.length === 3 ? 'ثلاثي' : 'رباعي';
+        roomPilgrims.forEach(p => {
+          assignedIds.add(p.id);
+          updatedPilgrimsMap.set(p.id, { ...p, room_number: rmNo, room_type: rmType });
+        });
+        idxQ += roomPilgrims.length;
+        roomNumberCounter++;
+      }
+
+      // 5. Assign Flexible / Default Pilgrims (4 per quad, then 3/2/1 as needed)
+      let idxF = 0;
+      while (idxF < flexiblePilgrims.length) {
+        const rem = flexiblePilgrims.length - idxF;
+        let cap = 4;
+        if (rem === 3) cap = 3;
+        else if (rem === 2) cap = 2;
+        else if (rem === 1) cap = 1;
+        else cap = 4;
+
+        const roomPilgrims = flexiblePilgrims.slice(idxF, idxF + cap);
+        const rmNo = `${roomNumberCounter}`;
+        const rmType: RoomType = roomPilgrims.length === 1 ? 'فردي' : roomPilgrims.length === 2 ? 'ثنائي' : roomPilgrims.length === 3 ? 'ثلاثي' : 'رباعي';
+
+        roomPilgrims.forEach(p => {
+          assignedIds.add(p.id);
+          updatedPilgrimsMap.set(p.id, { ...p, room_number: rmNo, room_type: rmType });
+        });
+
+        idxF += roomPilgrims.length;
+        roomNumberCounter++;
+      }
     };
 
-    assignClusterToRooms(unassignedMales);
-    assignClusterToRooms(unassignedFemales);
+    distributeUnlinkedGroup(unlinkedMales);
+    distributeUnlinkedGroup(unlinkedFemales);
 
     const nextPilgrims = snapshot.pilgrims.map(p => updatedPilgrimsMap.get(p.id) || p);
 
@@ -833,7 +1268,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       pilgrims: nextPilgrims
     });
 
-    toast.success(`تم التسكين الذكي لـ ${hotelPilgrims.length} معتمر بـ ${hotelName} (تجميع العائلات والأزواج بناءً على ملاحظات الشيت وروابط الأسر)`);
+    const familyCount = familyClusterMap.size;
+    toast.success(`تم التسكين بـ ${hotelName}: مطابقة ${familyCount} عائلة بالكامل وتوزيع المعتمرين الأفراد حسب المواصفات والجنس`);
   }, [snapshot, commitChange]);
 
   // Family Validation Engine (detecting gender conflicts, unlinked marital pairs, non-mahram mixes)
@@ -883,12 +1319,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Preflight Validation Engine
   const validatePreflight = useCallback((targetHotel?: string): PreflightValidationResult => {
-    const activePilgrims = targetHotel && targetHotel !== 'all'
+    const rawPilgrims = targetHotel && targetHotel !== 'all'
       ? snapshot.pilgrims.filter(p => p.makkah_hotel === targetHotel || p.madinah_hotel === targetHotel)
       : snapshot.pilgrims;
 
+    const activePilgrims = rawPilgrims.filter(p => !isPilgrimWithdrawn(p));
+    const withdrawnInRooms = rawPilgrims.filter(p => isPilgrimWithdrawn(p) && p.room_number);
+
     const errors: PreflightValidationResult['errors'] = [];
     const warnings: PreflightValidationResult['warnings'] = [];
+
+    if (withdrawnInRooms.length > 0) {
+      errors.push({
+        type: 'capacity_exceeded',
+        message: `تنبيه: يوجد ${withdrawnInRooms.length} معتمر ملغي/مستبعد مسكنون في غرف. يرجى تشغيل التسكين الذكي التلقائي لإلغاء تسكينهم فوراً.`
+      });
+    }
 
     // 1. Hotel Mismatch Check
     const pilgrimTripsMap = new Map<string, string>();
@@ -973,7 +1419,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           trips: data.trips && data.trips.length > 0 ? data.trips : snapshot.trips,
           roomings: data.roomings && data.roomings.length > 0 ? data.roomings : snapshot.roomings,
           transports: data.transports && data.transports.length > 0 ? data.transports : snapshot.transports,
-          financeRecords: data.financeRecords && data.financeRecords.length > 0 ? data.financeRecords : snapshot.financeRecords,
+          financeRecords: Array.isArray(data.financeRecords) ? data.financeRecords : snapshot.financeRecords,
           notifications: [
             {
               id: `NOTIF-${Date.now()}`,
@@ -997,26 +1443,201 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [snapshot, commitChange]);
 
-  const handleGoogleSignIn = useCallback(async () => {
+  // Google Registration & Admin Approval Handlers
+  const approvePendingUser = useCallback((id: string, role: string, phone?: string, national_id?: string, permissions?: StaffPermission) => {
+    const currentPending = snapshot.pendingUsers || [];
+    const pUser = currentPending.find(u => u.id === id);
+    if (!pUser) return;
+
+    const updatedPending = currentPending.map(u => u.id === id ? { ...u, status: 'approved' as const, role } : u);
+
+    // Add to active staff if not already present
+    const existingStaff = snapshot.staff.find(s => s.name.toLowerCase() === pUser.displayName.toLowerCase());
+    let updatedStaff = [...snapshot.staff];
+
+    if (!existingStaff) {
+      const newStaffMember: Staff = {
+        id: 'ST-' + Math.floor(100 + Math.random() * 900),
+        name: pUser.displayName,
+        role: role || 'مشرف رحلات العمرة والمجموعات',
+        status: 'نشط',
+        phone: phone || pUser.phone || '01000000000',
+        national_id: national_id || pUser.national_id || '29000000000000',
+        permissions: permissions || getDefaultPermissionsForRole(role)
+      };
+      updatedStaff.push(newStaffMember);
+    } else {
+      updatedStaff = updatedStaff.map(s => s.id === existingStaff.id ? { ...s, role, status: 'نشط' } : s);
+    }
+
+    const notif: NotificationRecord = {
+      id: 'NOTIF-APP-' + Date.now(),
+      title: '✅ تم اعتماد حساب الموظف الجديد',
+      message: `تم موافقة مدير النظام على انضمام الموظف (${pUser.displayName}) كموظف مسجل بصلاحية (${role}).`,
+      type: 'user_approval',
+      date: new Date().toISOString().split('T')[0],
+      read: false,
+      severity: 'low'
+    };
+
+    commitChange({
+      ...snapshot,
+      pendingUsers: updatedPending,
+      staff: updatedStaff,
+      notifications: [notif, ...snapshot.notifications]
+    });
+
+    toast.success(`تم اعتماد الموظف (${pUser.displayName}) وتحديد مسمى (${role}) بنجاح!`);
+  }, [snapshot, commitChange]);
+
+  const rejectPendingUser = useCallback((id: string, reason?: string) => {
+    const currentPending = snapshot.pendingUsers || [];
+    const pUser = currentPending.find(u => u.id === id);
+    if (!pUser) return;
+
+    const updatedPending = currentPending.map(u => u.id === id ? { ...u, status: 'rejected' as const, rejectionReason: reason } : u);
+
+    commitChange({
+      ...snapshot,
+      pendingUsers: updatedPending
+    });
+
+    toast.info(`تم رفض طلب انضمام (${pUser.displayName}).`);
+  }, [snapshot, commitChange]);
+
+  const loginWithGoogle = useCallback(async () => {
     try {
       const res = await googleSignIn();
-      if (res) {
-        setIsGoogleConnected(true);
-        setGoogleUserEmail(res.user.email);
-        toast.success(`تم الربط المباشر مع حساب جوجل (${res.user.email})`);
-        syncFromGoogleSheets();
-      }
-    } catch (err: any) {
-      toast.error('خطأ في تسجيل الدخول بـ Google OAuth: ' + (err.message || ''));
-    }
-  }, [syncFromGoogleSheets]);
+      if (!res?.user) return;
+      const email = res.user.email || '';
+      const displayName = res.user.displayName || email.split('@')[0];
+      const photoURL = res.user.photoURL || undefined;
 
-  const handleGoogleLogout = useCallback(async () => {
+      setIsGoogleConnected(true);
+      setGoogleUserEmail(email);
+
+      // 1. If Admin email or role
+      if (email.toLowerCase() === 'mohamedseo2002@gmail.com' || (snapshot.currentRole || 'admin') === 'admin') {
+        setCurrentUser({
+          email,
+          displayName,
+          photoURL,
+          role: 'مدير النظام',
+          status: 'admin'
+        });
+        toast.success(`مرحباً بك يا مدير النظام (${displayName})! تم الدخول بصلاحيات كاملة.`);
+        syncFromGoogleSheets();
+        return;
+      }
+
+      // 2. Check pendingUsers or staff
+      const existingReq = (snapshot.pendingUsers || []).find(p => p.email.toLowerCase() === email.toLowerCase());
+      const existingStaff = snapshot.staff.find(s => s.name.toLowerCase() === displayName.toLowerCase());
+
+      if (existingReq) {
+        if (existingReq.status === 'approved') {
+          setCurrentUser({
+            email,
+            displayName,
+            photoURL,
+            role: existingReq.role || 'موظف مسجل',
+            status: 'approved'
+          });
+          toast.success(`مرحباً بك (${displayName})! تم اعتماد دخولك بنجاح.`);
+        } else if (existingReq.status === 'rejected') {
+          setCurrentUser({
+            email,
+            displayName,
+            photoURL,
+            status: 'rejected'
+          });
+          toast.error('عفواً، تم رفض طلب انضمامك من قبل مدير النظام.');
+        } else {
+          setCurrentUser({
+            email,
+            displayName,
+            photoURL,
+            status: 'pending'
+          });
+          toast.info('طلب انضمامك قيد المراجعة والاعتماد لدى مدير النظام.');
+        }
+      } else if (existingStaff) {
+        setCurrentUser({
+          email,
+          displayName,
+          photoURL,
+          role: existingStaff.role,
+          status: 'approved'
+        });
+        toast.success(`مرحباً بك يا (${displayName})! تم الدخول بصلاحية: ${existingStaff.role}`);
+      } else {
+        // Create new pending user request
+        const newReq: PendingUser = {
+          id: 'REQ-' + Date.now().toString().slice(-6),
+          email,
+          displayName,
+          photoURL,
+          requestedAt: new Date().toISOString().split('T')[0],
+          status: 'pending',
+          role: 'بانتظار موافقة مدير النظام'
+        };
+
+        const newNotif: NotificationRecord = {
+          id: 'NOTIF-APP-' + Date.now(),
+          title: '🚨 طلب انضمام مستخدم جديد عبر جوجل',
+          message: `قام المستخدم (${displayName} - ${email}) بالتسجيل عبر جوجل، بانتظار موافقة مدير النظام وتعيين المسمى الوظيفي والصلاحيات.`,
+          type: 'user_approval',
+          date: new Date().toISOString().split('T')[0],
+          read: false,
+          severity: 'high'
+        };
+
+        commitChange({
+          ...snapshot,
+          pendingUsers: [...(snapshot.pendingUsers || []), newReq],
+          notifications: [newNotif, ...snapshot.notifications]
+        });
+
+        setCurrentUser({
+          email,
+          displayName,
+          photoURL,
+          status: 'pending'
+        });
+
+        toast.info('تم تقديم طلب الانضمام بنجاح! طلبك الآن بانتظار موافقة مدير النظام وتعيين الصلاحيات.');
+      }
+      syncFromGoogleSheets();
+    } catch (err: any) {
+      toast.error('خطأ في التسجيل عبر جوجل: ' + (err.message || ''));
+    }
+  }, [snapshot, commitChange, syncFromGoogleSheets]);
+
+  const logoutCurrentUser = useCallback(async () => {
     await logoutGoogle();
     setIsGoogleConnected(false);
     setGoogleUserEmail(null);
-    toast.info('تم إلغاء ربط حساب جوجل');
+    setCurrentUser(null);
+    toast.info('تم تسجيل الخروج بنجاح.');
   }, []);
+
+  const loginAsAdminBypass = useCallback(() => {
+    setCurrentUser({
+      email: 'admin@megastartours.com',
+      displayName: 'مدير النظام (Admin)',
+      role: 'مدير النظام',
+      status: 'admin'
+    });
+    toast.success('تم دخول وضع مدير النظام لمراجعة واعتماد الطلبات.');
+  }, []);
+
+  const handleGoogleSignIn = useCallback(async () => {
+    await loginWithGoogle();
+  }, [loginWithGoogle]);
+
+  const handleGoogleLogout = useCallback(async () => {
+    await logoutCurrentUser();
+  }, [logoutCurrentUser]);
 
   // Server Function: OCR Passport
   const ocrExtractPassport = useCallback(async (base64Image: string, mimeType: string = 'image/jpeg') => {
@@ -1113,6 +1734,118 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, [snapshot, commitChange]);
 
+  // Smart Alert Scanner for Staff Iqamas and Pilgrim Passports
+  const scanAndGenerateSmartAlerts = useCallback(() => {
+    const newAlerts: NotificationRecord[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const existingNotifKeys = new Set(
+      (snapshot.notifications || []).map(n => `${n.type}_${n.target_staff_id || n.target_entity_name}`)
+    );
+
+    // 1. Check Staff Iqamas
+    (snapshot.staff || []).forEach(st => {
+      if (st.iqama_expiry_date) {
+        const expDate = new Date(st.iqama_expiry_date);
+        expDate.setHours(0, 0, 0, 0);
+        const diffMs = expDate.getTime() - today.getTime();
+        const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+        if (daysRemaining <= 30) {
+          const notifKey = `iqama_expiry_${st.id}`;
+          if (!existingNotifKeys.has(notifKey)) {
+            const isExpired = daysRemaining < 0;
+            newAlerts.push({
+              id: `NOTIF-IQ-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+              title: isExpired 
+                ? `🚨 تنبيه عاجل: إقامة منتهية للموظف (${st.name})` 
+                : `⚠️ اقتراب موعد تجديد إقامة الموظف (${st.name})`,
+              message: isExpired
+                ? `انتهت إقامة الموظف (${st.role}) برقم (${st.iqama_number || 'غير مدخل'}) بتاريخ ${st.iqama_expiry_date}. يُرجى اتخاذ إجراء السداد والتجديد فوراً تجنباً للغرامات.`
+                : `متبقي ${daysRemaining} يوم فقط على انتهاء إقامة الموظف (${st.role}) برقم (${st.iqama_number || 'غير مدخل'}) بتاريخ ${st.iqama_expiry_date}.`,
+              type: 'iqama_expiry',
+              date: new Date().toISOString().split('T')[0],
+              read: false,
+              severity: isExpired || daysRemaining <= 7 ? 'high' : 'medium',
+              target_staff_id: st.id,
+              target_entity_name: st.name,
+              days_remaining: daysRemaining
+            });
+          }
+        }
+      }
+    });
+
+    // 2. Check Pilgrim Passport Expirations
+    (snapshot.pilgrims || []).forEach(p => {
+      if (!isPilgrimWithdrawn(p) && p.passport_expiry_date) {
+        const expDate = new Date(p.passport_expiry_date);
+        expDate.setHours(0, 0, 0, 0);
+        const diffMs = expDate.getTime() - today.getTime();
+        const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+        // Travel standards require passports valid for at least 6 months (180 days)
+        if (daysRemaining <= 180) {
+          const notifKey = `passport_expiry_${p.name}`;
+          if (!existingNotifKeys.has(notifKey)) {
+            const isExpired = daysRemaining < 0;
+            newAlerts.push({
+              id: `NOTIF-PASS-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+              title: isExpired
+                ? `🚨 جواز سفر منتهي للمعتمر (${p.name})`
+                : `⚠️ اقتراب انتهاء جواز سفر المعتمر (${p.name})`,
+              message: isExpired
+                ? `انتهت صلاحية جواز السفر للمعتمر (${p.name}) برقم (${p.passport_number}) بتاريخ ${p.passport_expiry_date}. يتعذر اصدار التأشيرة أو السفر والجواز منتهي.`
+                : `جواز سفر المعتمر (${p.name}) برقم (${p.passport_number}) ينتهي خلال ${daysRemaining} يوم (تاريخ الانتهاء: ${p.passport_expiry_date}). يُرجى التجديد قبل التوجه للمطار.`,
+              type: 'passport_expiry',
+              date: new Date().toISOString().split('T')[0],
+              read: false,
+              severity: isExpired || daysRemaining <= 60 ? 'high' : 'medium',
+              target_entity_name: p.name,
+              days_remaining: daysRemaining
+            });
+          }
+        }
+      }
+    });
+
+    if (newAlerts.length > 0) {
+      commitChange({
+        ...snapshot,
+        notifications: [...newAlerts, ...(snapshot.notifications || [])]
+      });
+      toast.success(`تم إنشاء (${newAlerts.length}) تنبيه ذكي جديد لمواعيد الإقامات وجوازات السفر`);
+    } else {
+      toast.info('تم فحص النظام: جميع الإقامات وجوازات السفر تحت السيطرة ولا توجد تنبيهات جديدة');
+    }
+
+    return { createdCount: newAlerts.length };
+  }, [snapshot, commitChange]);
+
+  // Send Direct Alert Notification to Staff Member
+  const sendDirectAlertToStaff = useCallback((staffId: string, title: string, message: string) => {
+    const targetStaff = (snapshot.staff || []).find(s => s.id === staffId);
+    const newNotif: NotificationRecord = {
+      id: `NOTIF-DIRECT-${Date.now()}`,
+      title: title || `تنبيه إداري موجه إلى (${targetStaff?.name || 'الموظف'})`,
+      message: message,
+      type: 'document',
+      date: new Date().toISOString().split('T')[0],
+      read: false,
+      severity: 'high',
+      target_staff_id: staffId,
+      target_entity_name: targetStaff?.name
+    };
+
+    commitChange({
+      ...snapshot,
+      notifications: [newNotif, ...(snapshot.notifications || [])]
+    });
+
+    toast.success(`تم إرسال التنبيه الفوري بنجاح إلى الموظف (${targetStaff?.name || ''}) 🔔`);
+  }, [snapshot, commitChange]);
+
   // Accounting Closings
   const addAccountingClosing = useCallback((closing: Omit<AccountingClosingRecord, 'id'>) => {
     const newClosing: AccountingClosingRecord = {
@@ -1184,12 +1917,41 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     toast.info('تم استعادة البيانات المبدئية للموسم بنجاح');
   }, [commitChange]);
 
+  const restoreFullBackup = useCallback((importedData: Partial<AppSnapshot>) => {
+    // Merge imported snapshot with current defaults to ensure no missing properties
+    const restoredSnapshot: AppSnapshot = {
+      pilgrims: Array.isArray(importedData.pilgrims) ? importedData.pilgrims : snapshot.pilgrims,
+      trips: Array.isArray(importedData.trips) ? importedData.trips : snapshot.trips,
+      roomings: Array.isArray(importedData.roomings) ? importedData.roomings : snapshot.roomings,
+      staff: Array.isArray(importedData.staff) ? importedData.staff : snapshot.staff,
+      transports: Array.isArray(importedData.transports) ? importedData.transports : snapshot.transports,
+      familyGroups: Array.isArray(importedData.familyGroups) ? importedData.familyGroups : snapshot.familyGroups,
+      financeRecords: Array.isArray(importedData.financeRecords) ? importedData.financeRecords : snapshot.financeRecords,
+      documents: Array.isArray(importedData.documents) ? importedData.documents : snapshot.documents,
+      notifications: Array.isArray(importedData.notifications) ? importedData.notifications : snapshot.notifications,
+      closings: Array.isArray(importedData.closings) ? importedData.closings : snapshot.closings,
+      currentRole: importedData.currentRole || snapshot.currentRole || 'admin',
+    };
+
+    commitChange(restoredSnapshot);
+    toast.success('تم استرجاع النسخة الاحتياطية بنجاح ودمج كافة السجلات!');
+  }, [commitChange, snapshot]);
+
   const value = useMemo(() => ({
     // Google OAuth & Sync
     isGoogleConnected,
     googleUserEmail,
     handleGoogleSignIn,
     handleGoogleLogout,
+
+    // Google User Auth & Admin Approval System
+    pendingUsers: snapshot.pendingUsers || [],
+    currentUser,
+    approvePendingUser,
+    rejectPendingUser,
+    loginWithGoogle,
+    logoutCurrentUser,
+    loginAsAdminBypass,
 
     currency,
     setCurrency,
@@ -1235,7 +1997,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     addStaff,
     updateStaff,
+    bulkUpdateStaff,
     deleteStaff,
+    bulkDeleteStaff,
     toggleStaffStatus,
 
     addTransport,
@@ -1247,6 +2011,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     deleteFamilyGroup,
     unlinkFamilyMemberAndRedistribute,
     deleteFamilyGroupAndRedistribute,
+    transferFamilyMember,
+    deduplicateFamilyGroups,
 
     financeRecords: snapshot.financeRecords || [],
     addFinanceRecord,
@@ -1260,6 +2026,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     notifications: snapshot.notifications || [],
     markNotificationRead,
     addNotification,
+    scanAndGenerateSmartAlerts,
+    sendDirectAlertToStaff,
 
     closings: snapshot.closings || [],
     addAccountingClosing,
@@ -1269,6 +2037,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     autoRooming,
     validateFamilyGroups,
+    generateNumberedFamilyLinks,
     validatePreflight,
     syncFromGoogleSheets,
     appendPilgrimToSheet,
@@ -1276,9 +2045,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     generateTripAiSummary,
     generateFinancialInsights,
     generateAiErrorDetection,
-    resetToDefaultSeed
+    resetToDefaultSeed,
+    restoreFullBackup
   }), [
     isGoogleConnected, googleUserEmail, handleGoogleSignIn, handleGoogleLogout, appendPilgrimToSheet,
+    currentUser, approvePendingUser, rejectPendingUser, loginWithGoogle, logoutCurrentUser, loginAsAdminBypass,
     currency, exchangeRate, formatCurrency,
     snapshot, selectedHotelFilter, searchQuery, theme, activePage,
     history.length, future.length, undo, redo,
@@ -1286,12 +2057,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     addTrip, updateTrip, deleteTrip, addRooming, updateRooming, deleteRooming,
     addStaff, updateStaff, deleteStaff, toggleStaffStatus,
     addTransport, updateTransport, deleteTransport,
-    addFamilyGroup, updateFamilyGroup, deleteFamilyGroup, unlinkFamilyMemberAndRedistribute, deleteFamilyGroupAndRedistribute,
+    addFamilyGroup, updateFamilyGroup, deleteFamilyGroup, unlinkFamilyMemberAndRedistribute, deleteFamilyGroupAndRedistribute, transferFamilyMember, deduplicateFamilyGroups,
     addFinanceRecord, updateFinanceRecord, deleteFinanceRecord,
-    addDocument, deleteDocument, markNotificationRead, addNotification,
+    addDocument, deleteDocument, markNotificationRead, addNotification, scanAndGenerateSmartAlerts, sendDirectAlertToStaff,
     addAccountingClosing, setCurrentRole,
-    autoRooming, validateFamilyGroups, validatePreflight, syncFromGoogleSheets, ocrExtractPassport,
-    generateTripAiSummary, generateFinancialInsights, generateAiErrorDetection, resetToDefaultSeed
+    autoRooming, validateFamilyGroups, generateNumberedFamilyLinks, validatePreflight, syncFromGoogleSheets, ocrExtractPassport,
+    generateTripAiSummary, generateFinancialInsights, generateAiErrorDetection, resetToDefaultSeed, restoreFullBackup
   ]);
 
   if (!isLoaded) {

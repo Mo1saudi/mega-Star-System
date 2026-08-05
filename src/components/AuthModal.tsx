@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Lock, User, KeyRound, Shield, CheckCircle2, UserCheck, LogOut, ArrowRight } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { UserRole } from '../types';
+import { CompanyLogo } from './CompanyLogo';
 import { toast } from 'sonner';
 
 interface AuthModalProps {
@@ -20,12 +21,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   if (!isOpen) return null;
 
   const roleLabels: Record<UserRole, { label: string; desc: string; badge: string }> = {
-    admin: { label: 'مدير النظام الكامل (Admin)', desc: 'تحكم كامل بالتسكين، الحسابات، المعتمرين، والتقارير', badge: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30' },
-    manager: { label: 'مدير عمليات العمرة (Manager)', desc: 'إدارة الرحلات والسكن وتخصيص المندوبين', badge: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30' },
-    operations: { label: 'مشرف التسكين والنقل (Operations)', desc: 'إدارة وتوزيع الغرف والحافلات والمجموعات', badge: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30' },
-    finance: { label: 'المحاسب المالي (Finance)', desc: 'إدارة المقبوضات والمصروفات والقيود والإغلاق المالي', badge: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' },
-    supervisor: { label: 'مندوب / مشرف ميداني (Supervisor)', desc: 'متابعة المعتمرين والرحلات وتصاريح العمرة', badge: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30' },
-    viewer: { label: 'مشاهد / للقراءة فقط (Viewer)', desc: 'عرض البيانات والتقارير دون إمكانية التعديل أو الحذف', badge: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30' }
+    admin: { label: 'مدير النظام الكامل (Admin)', desc: 'تحكم كامل بالتسكين، الحسابات، المعتمرين، والتقارير والإعدادات', badge: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30' },
+    manager: { label: 'مدير العمليات (Manager)', desc: 'إدارة الرحلات والسكن وتخصيص الموظفين والتقارير الشاملة', badge: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30' },
+    operations: { label: 'موظف عمليات وتفويج (Operations)', desc: 'متابعة المعتمرين والرحلات وتصاريح العمرة والروضة والحافلات والغرف', badge: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30' },
+    finance: { label: 'المحاسب المالي المعتمد (Finance)', desc: 'إدارة المقبوضات والمصروفات والعمولات والتحصيل والإغلاق المالي', badge: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' },
+    viewer: { label: 'مستعرض / للقراءة فقط (Viewer)', desc: 'عرض البيانات والتقارير دون إمكانية التعديل أو الحذف', badge: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30' }
   };
 
   const handleAuthSubmit = (e: React.FormEvent) => {

@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { useStore } from '../lib/store';
+import { useStore, isPilgrimWithdrawn } from '../lib/store';
 import { SEO } from '../components/SEO';
 import { Pilgrim, RoomType } from '../types';
 import { 
   BedDouble, Hotel, Sparkles, CheckCircle2, ShieldAlert, 
   AlertTriangle, RefreshCw, Wand2, Users, Building, Lock,
   ArrowRightLeft, UserX, UserPlus, X, ChevronDown, ChevronUp, Search,
-  Filter, Heart, Users2, FileText, Trash2, ArrowRight
+  Filter, Heart, Users2, FileText, Trash2, ArrowRight, GripVertical, Move
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { toast } from 'sonner';
@@ -20,6 +20,10 @@ export const RoomingPage: React.FC = () => {
   const [activeCityTab, setActiveCityTab] = useState<'مكة' | 'المدينة'>('مكة');
   const [showPreflightModal, setShowPreflightModal] = useState(false);
   const [selectedHotelForPreflight, setSelectedHotelForPreflight] = useState<string>('');
+
+  // Drag and Drop States
+  const [draggedPilgrim, setDraggedPilgrim] = useState<Pilgrim | null>(null);
+  const [activeDropTarget, setActiveDropTarget] = useState<string | null>(null);
 
   // Advanced Search & Filtering Controls
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,6 +90,10 @@ export const RoomingPage: React.FC = () => {
 
   // Open Move/Assign modal
   const handleOpenMoveModal = (p: Pilgrim, defaultHotel: string) => {
+    if (isPilgrimWithdrawn(p)) {
+      toast.error(`المعتمر (${p.name}) ملغي/مستبعد؛ لا يمكن تسكينه في الغرف`);
+      return;
+    }
     setMovingPilgrim(p);
     setTargetRoomNo(p.room_number || '');
     setTargetRoomType(p.room_type || 'رباعي');
@@ -96,6 +104,12 @@ export const RoomingPage: React.FC = () => {
   const handleSaveRoomMove = (e: React.FormEvent) => {
     e.preventDefault();
     if (!movingPilgrim) return;
+
+    if (isPilgrimWithdrawn(movingPilgrim)) {
+      toast.error(`المعتمر (${movingPilgrim.name}) ملغي/مستبعد؛ لا يمكن تسكينه`);
+      setMovingPilgrim(null);
+      return;
+    }
 
     if (!targetRoomNo.trim()) {
       toast.error('يرجى إدخال رقم الغرفة المستهدفة');
@@ -116,10 +130,119 @@ export const RoomingPage: React.FC = () => {
 
   // Quick remove from room
   const handleRemoveFromRoom = (p: Pilgrim) => {
-    if (confirm(`إلغاء تسكين المعتمر (${p.name}) وإزالته من غرفة #${p.room_number}؟`)) {
-      updatePilgrim(p.id, { room_number: '' });
-      toast.info(`تم إزالة المعتمر (${p.name}) من التسكين بنجاح`);
+    updatePilgrim(p.id, { room_number: '' });
+    toast.info(`تم إزالة المعتمر (${p.name}) من الغرفة بنجاح`);
+  };
+
+  // Drag & Drop Handlers
+  const handleDragStart = (e: React.DragEvent, pilgrim: Pilgrim) => {
+    setDraggedPilgrim(pilgrim);
+    try {
+      e.dataTransfer.setData('text/plain', pilgrim.id);
+      e.dataTransfer.setData('application/json', JSON.stringify({ pilgrimId: pilgrim.id, currentRoom: pilgrim.room_number || '' }));
+    } catch (err) {
+      console.error(err);
     }
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragEnd = () => {
+    setDraggedPilgrim(null);
+    setActiveDropTarget(null);
+  };
+
+  const handleDropOnRoom = (e: React.DragEvent, roomNo: string, defaultRoomType: RoomType, hotelName: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setActiveDropTarget(null);
+
+    let targetPilgrim = draggedPilgrim;
+    let pilgrimId = targetPilgrim?.id;
+
+    if (!pilgrimId) {
+      try {
+        const jsonStr = e.dataTransfer.getData('application/json');
+        const textStr = e.dataTransfer.getData('text/plain');
+        const raw = jsonStr || textStr;
+        if (raw) {
+          if (raw.startsWith('{')) {
+            pilgrimId = JSON.parse(raw).pilgrimId;
+          } else {
+            pilgrimId = raw;
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    if (!targetPilgrim && pilgrimId) {
+      targetPilgrim = pilgrims.find(p => p.id === pilgrimId) || null;
+    }
+
+    setDraggedPilgrim(null);
+
+    if (!targetPilgrim) return;
+
+    if (isPilgrimWithdrawn(targetPilgrim)) {
+      toast.error(`المعتمر (${targetPilgrim.name}) ملغي/مستبعد؛ لا يمكن تسكينه في الغرف`);
+      return;
+    }
+
+    if (targetPilgrim.room_number === roomNo) return; // Already in room
+
+    const hotelKey = activeCityTab === 'مكة' ? 'makkah_hotel' : 'madinah_hotel';
+    updatePilgrim(targetPilgrim.id, {
+      room_number: roomNo,
+      room_type: defaultRoomType,
+      [hotelKey]: hotelName
+    });
+
+    toast.success(`تم نقل المعتمر (${targetPilgrim.name}) إلى غرفة #${roomNo} بنجاح بالسحب والإفلات`);
+  };
+
+  const handleDropOnUnassigned = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setActiveDropTarget(null);
+
+    let targetPilgrim = draggedPilgrim;
+    let pilgrimId = targetPilgrim?.id;
+
+    if (!pilgrimId) {
+      try {
+        const jsonStr = e.dataTransfer.getData('application/json');
+        const textStr = e.dataTransfer.getData('text/plain');
+        const raw = jsonStr || textStr;
+        if (raw) {
+          if (raw.startsWith('{')) {
+            pilgrimId = JSON.parse(raw).pilgrimId;
+          } else {
+            pilgrimId = raw;
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    if (!targetPilgrim && pilgrimId) {
+      targetPilgrim = pilgrims.find(p => p.id === pilgrimId) || null;
+    }
+
+    setDraggedPilgrim(null);
+
+    if (!targetPilgrim) return;
+
+    updatePilgrim(targetPilgrim.id, { room_number: '' });
+    toast.info(`تم إلغاء تسكين المعتمر (${targetPilgrim.name}) وإعادته لقائمة الانتظار`);
+  };
+
+  const handleQuickChangeRoomType = (roomPilgrims: Pilgrim[], newType: RoomType) => {
+    roomPilgrims.forEach(p => {
+      updatePilgrim(p.id, { room_type: newType });
+    });
+    toast.success(`تم تحديث نوع الغرفة إلى (${newType}) لجميع أفرادها`);
   };
 
   const toggleUnassignedDrawer = (hotelName: string) => {
@@ -317,7 +440,7 @@ export const RoomingPage: React.FC = () => {
         ) : (
           displayHotels.map((hotel) => {
             const hotelKey = activeCityTab === 'مكة' ? 'makkah_hotel' : 'madinah_hotel';
-            const allHotelPilgrims = pilgrims.filter(p => p[hotelKey] === hotel.hotel_name);
+            const allHotelPilgrims = pilgrims.filter(p => p[hotelKey] === hotel.hotel_name && !isPilgrimWithdrawn(p));
             
             // Filter pilgrims according to active search/filter criteria
             const hotelPilgrims = allHotelPilgrims.filter(matchesFilter);
@@ -403,43 +526,96 @@ export const RoomingPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Unassigned Pilgrims Expandable List */}
+                  {/* Unassigned Pilgrims Expandable List (Also a Drop Zone) */}
                   {expandedUnassignedHotel[hotel.hotel_name] && (
-                    <div className="p-4 bg-amber-500/5 dark:bg-amber-900/10 border border-amber-500/20 rounded-2xl space-y-3 animate-fade-in">
+                    <div 
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        if (activeDropTarget !== `unassigned-${hotel.hotel_name}`) {
+                          setActiveDropTarget(`unassigned-${hotel.hotel_name}`);
+                        }
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        if (activeDropTarget === `unassigned-${hotel.hotel_name}`) {
+                          setActiveDropTarget(null);
+                        }
+                      }}
+                      onDrop={handleDropOnUnassigned}
+                      className={`p-4 rounded-2xl border transition-all animate-fade-in ${
+                        activeDropTarget === `unassigned-${hotel.hotel_name}`
+                          ? 'bg-amber-500/20 border-amber-500 ring-2 ring-amber-500/30 shadow-lg'
+                          : 'bg-amber-500/5 dark:bg-amber-900/10 border-amber-500/20'
+                      }`}
+                    >
                       <h4 className="text-xs font-extrabold text-amber-800 dark:text-amber-300 font-cairo flex items-center justify-between">
                         <span className="flex items-center gap-1.5">
                           <Users className="w-4 h-4 text-amber-500" />
-                          <span>قائمة المعتمرين غير المسكنين ({unassignedInHotel.length}):</span>
+                          <span>قائمة المعتمرين غير المسكنين ({unassignedInHotel.length}) - اسحب هنا لإلغاء تسكين أي معتمر:</span>
                         </span>
                       </h4>
 
                       {unassignedInHotel.length === 0 ? (
-                        <p className="text-xs text-slate-400 py-2">لا توجد نتائج تطابق التصفية الحالية لغير المسكنين</p>
+                        <p className="text-xs text-slate-400 py-3 text-center border-2 border-dashed border-amber-500/30 rounded-xl my-2 font-medium">
+                          اسحب أي معتمر وأسقطه هنا لإلغاء تسكينه وإعادته لقائمة الانتظار
+                        </p>
                       ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-2">
                           {unassignedInHotel.map(p => {
                             const isCoupleOrFamily = Boolean(p.family_group_link) || Boolean(p.notes && /زوج|زوجة|زوجين|أزواج|عائلة|إخوة|اسره/i.test(p.notes));
+                            const isWithdrawn = isPilgrimWithdrawn(p);
                             return (
-                              <div key={p.id} className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-500/30 space-y-2 text-xs">
+                              <div 
+                                key={p.id} 
+                                draggable={!isWithdrawn}
+                                onDragStart={(e) => {
+                                  if (isWithdrawn) {
+                                    e.preventDefault();
+                                    toast.error(`المعتمر (${p.name}) ملغي/مستبعد`);
+                                    return;
+                                  }
+                                  handleDragStart(e, p);
+                                }}
+                                onDragEnd={handleDragEnd}
+                                className={`p-3 rounded-xl border space-y-2 text-xs transition-all ${
+                                  isWithdrawn 
+                                    ? 'bg-rose-50/80 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/40 text-slate-500 cursor-not-allowed opacity-85'
+                                    : 'bg-white dark:bg-slate-900 border-amber-500/30 cursor-grab active:cursor-grabbing hover:border-amber-500 hover:shadow-md'
+                                } ${
+                                  draggedPilgrim?.id === p.id ? 'opacity-40 scale-95' : ''
+                                }`}
+                              >
                                 <div className="flex items-start justify-between gap-1">
-                                  <div>
-                                    <div className="font-bold text-slate-900 dark:text-slate-100">{p.name}</div>
-                                    <div className="text-[10px] text-slate-400">{p.passport_number} ({p.gender})</div>
+                                  <div className="flex items-center gap-1.5">
+                                    {!isWithdrawn && <GripVertical className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+                                    <div>
+                                      <div className={`font-bold ${isWithdrawn ? 'text-rose-800 dark:text-rose-300 line-through' : 'text-slate-900 dark:text-slate-100'}`}>
+                                        {p.name}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400">{p.passport_number} ({p.gender})</div>
+                                    </div>
                                   </div>
-                                  <button
-                                    onClick={() => handleOpenMoveModal(p, hotel.hotel_name)}
-                                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg transition-all shrink-0"
-                                    title="تسكين المعتمر بالغرفة"
-                                  >
-                                    <UserPlus className="w-3 h-3" />
-                                    <span>تسكين</span>
-                                  </button>
+                                  {isWithdrawn ? (
+                                    <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-700 dark:text-rose-300 text-[10px] font-extrabold shrink-0">
+                                      ملغي/مستبعد
+                                    </span>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleOpenMoveModal(p, hotel.hotel_name)}
+                                      className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg transition-all shrink-0 cursor-pointer"
+                                      title="تسكين المعتمر بالغرفة"
+                                    >
+                                      <UserPlus className="w-3 h-3" />
+                                      <span>تسكين</span>
+                                    </button>
+                                  )}
                                 </div>
 
                                 {/* Merged Cell / Family Note Badge */}
                                 {(p.notes || p.family_group_link || p.room_spec) && (
                                   <div className="flex flex-wrap gap-1 pt-1 border-t border-slate-100 dark:border-slate-800 text-[10px]">
-                                    {isCoupleOrFamily && (
+                                    {isCoupleOrFamily && !isWithdrawn && (
                                       <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 font-bold flex items-center gap-1">
                                         <Heart className="w-2.5 h-2.5 text-rose-500" />
                                         <span>رابط عائلي/أزواج</span>
@@ -478,12 +654,29 @@ export const RoomingPage: React.FC = () => {
                         const roomType = roomPilgrims[0]?.room_type || 'رباعي';
                         const gender = roomPilgrims[0]?.gender || 'ذكر';
                         const hasFamilyNotesInRoom = roomPilgrims.some(p => p.family_group_link || (p.notes && /زوج|زوجة|زوجين|أزواج|عائلة|إخوة|اسره/i.test(p.notes)));
+                        const isTarget = activeDropTarget === `room-${hotel.hotel_name}-${roomNo}`;
 
                         return (
                           <div 
                             key={roomNo} 
-                            className={`p-4 rounded-2xl border space-y-3 transition-all ${
-                              hasFamilyNotesInRoom 
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.dataTransfer.dropEffect = 'move';
+                              if (activeDropTarget !== `room-${hotel.hotel_name}-${roomNo}`) {
+                                setActiveDropTarget(`room-${hotel.hotel_name}-${roomNo}`);
+                              }
+                            }}
+                            onDragLeave={(e) => {
+                              e.preventDefault();
+                              if (activeDropTarget === `room-${hotel.hotel_name}-${roomNo}`) {
+                                setActiveDropTarget(null);
+                              }
+                            }}
+                            onDrop={(e) => handleDropOnRoom(e, roomNo, roomType, hotel.hotel_name)}
+                            className={`p-4 rounded-2xl border space-y-3 transition-all duration-200 ${
+                              isTarget 
+                                ? 'bg-amber-500/20 border-amber-500 ring-2 ring-amber-500/40 scale-[1.02] shadow-xl' 
+                                : hasFamilyNotesInRoom 
                                 ? 'bg-amber-500/5 dark:bg-amber-900/10 border-amber-500/30' 
                                 : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200/60 dark:border-slate-700/60'
                             }`}
@@ -499,34 +692,73 @@ export const RoomingPage: React.FC = () => {
                                   {gender}
                                 </span>
                               </div>
-                              <span className="text-xs font-bold text-slate-500 font-cairo">
-                                نوع: {roomType} ({roomPilgrims.length})
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-slate-400 font-medium">سعة الغرفة:</span>
+                                <select
+                                  value={roomType}
+                                  onChange={(e) => handleQuickChangeRoomType(roomPilgrims, e.target.value as RoomType)}
+                                  className="bg-white dark:bg-slate-900 text-[11px] font-bold text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                  title="تعديل نوع وسعة الغرفة فوراً"
+                                >
+                                  <option value="فردي">فردي (1)</option>
+                                  <option value="ثنائي">ثنائي (2)</option>
+                                  <option value="ثلاثي">ثلاثي (3)</option>
+                                  <option value="رباعي">رباعي (4)</option>
+                                </select>
+                                <span className="text-[10px] font-mono text-slate-400">({roomPilgrims.length})</span>
+                              </div>
                             </div>
 
-                            <div className="space-y-2">
+                            <div className="space-y-2 min-h-[50px]">
                               {roomPilgrims.map(p => {
                                 const pIsCoupleOrFamily = Boolean(p.family_group_link) || Boolean(p.notes && /زوج|زوجة|زوجين|أزواج|عائلة|إخوة|اسره/i.test(p.notes));
+                                const pIsWithdrawn = isPilgrimWithdrawn(p);
                                 return (
-                                  <div key={p.id} className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 space-y-1.5 group">
+                                  <div 
+                                    key={p.id} 
+                                    draggable={!pIsWithdrawn}
+                                    onDragStart={(e) => {
+                                      if (pIsWithdrawn) {
+                                        e.preventDefault();
+                                        toast.error(`المعتمر (${p.name}) ملغي/مستبعد`);
+                                        return;
+                                      }
+                                      handleDragStart(e, p);
+                                    }}
+                                    onDragEnd={handleDragEnd}
+                                    className={`p-2.5 rounded-xl border space-y-1.5 group transition-all ${
+                                      pIsWithdrawn
+                                        ? 'bg-rose-50/90 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50 cursor-not-allowed opacity-90'
+                                        : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 cursor-grab active:cursor-grabbing hover:border-amber-500/50 hover:shadow-sm'
+                                    } ${
+                                      draggedPilgrim?.id === p.id ? 'opacity-40 scale-95' : ''
+                                    }`}
+                                  >
                                     <div className="flex items-center justify-between text-xs">
-                                      <div>
-                                        <span className="font-bold text-slate-900 dark:text-slate-100 block">{p.name}</span>
-                                        <span className="text-[10px] font-mono text-slate-400">{p.passport_number}</span>
+                                      <div className="flex items-center gap-1.5">
+                                        {!pIsWithdrawn && <GripVertical className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+                                        <div>
+                                          <span className={`font-bold block ${pIsWithdrawn ? 'text-rose-800 dark:text-rose-300 line-through' : 'text-slate-900 dark:text-slate-100'}`}>
+                                            {p.name}
+                                          </span>
+                                          <span className="text-[10px] font-mono text-slate-400">{p.passport_number}</span>
+                                        </div>
                                       </div>
                                       
                                       {/* Action buttons for Move or Remove */}
                                       <div className="flex items-center gap-1 opacity-90 sm:opacity-70 group-hover:opacity-100 transition-opacity">
-                                        <button
-                                          onClick={() => handleOpenMoveModal(p, hotel.hotel_name)}
-                                          className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                                          title="نقل المعتمر لغرفة أخرى"
-                                        >
-                                          <ArrowRightLeft className="w-3.5 h-3.5" />
-                                        </button>
+                                        {!pIsWithdrawn && (
+                                          <button
+                                            onClick={() => handleOpenMoveModal(p, hotel.hotel_name)}
+                                            className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                                            title="نقل المعتمر لغرفة أخرى"
+                                          >
+                                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
                                         <button
                                           onClick={() => handleRemoveFromRoom(p)}
-                                          className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                                          className="p-1.5 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
                                           title="إلغاء التسكين (إزالة من الغرفة)"
                                         >
                                           <UserX className="w-3.5 h-3.5" />
@@ -534,15 +766,19 @@ export const RoomingPage: React.FC = () => {
                                       </div>
                                     </div>
 
-                                    {/* Merged Notes / Family Badges */}
-                                    {(p.notes || p.family_group_link || p.room_spec) && (
-                                      <div className="flex flex-wrap gap-1 text-[10px] pt-1 border-t border-slate-100 dark:border-slate-800">
-                                        {pIsCoupleOrFamily && (
-                                          <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 font-bold flex items-center gap-0.5">
-                                            <Heart className="w-2.5 h-2.5 text-rose-500" />
-                                            <span>رابط عائلي/أزواج</span>
-                                          </span>
-                                        )}
+                                    {/* Merged Notes / Family Badges / Withdrawn Status */}
+                                    <div className="flex flex-wrap gap-1 text-[10px] pt-1 border-t border-slate-100 dark:border-slate-800">
+                                      {pIsWithdrawn && (
+                                        <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-700 dark:text-rose-300 font-extrabold">
+                                          ملغي/مستبعد (يلزم إلغاء تسكينه)
+                                        </span>
+                                      )}
+                                      {pIsCoupleOrFamily && !pIsWithdrawn && (
+                                        <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 font-bold flex items-center gap-0.5">
+                                          <Heart className="w-2.5 h-2.5 text-rose-500" />
+                                          <span>رابط عائلي/أزواج</span>
+                                        </span>
+                                      )}
                                         {p.notes && (
                                           <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 font-bold truncate max-w-[200px]" title={p.notes}>
                                             📝 {p.notes}
@@ -554,7 +790,6 @@ export const RoomingPage: React.FC = () => {
                                           </span>
                                         )}
                                       </div>
-                                    )}
                                   </div>
                                 );
                               })}

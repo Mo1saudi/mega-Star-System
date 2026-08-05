@@ -1,9 +1,10 @@
 import React from 'react';
 import { useStore } from '../lib/store';
+import { CompanyLogo } from './CompanyLogo';
 import { 
   LayoutDashboard, Users, HeartHandshake, BedDouble, 
   PlaneTakeoff, UserCheck, Star, RefreshCw, DollarSign, 
-  FileText, BarChart3, Bell, Lock, Settings 
+  FileText, BarChart3, Bell, Lock, Settings, Award 
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
@@ -18,29 +19,20 @@ export const Sidebar: React.FC = () => {
     { id: 'rooming', label: 'التسكين والفنادق', icon: BedDouble },
     { id: 'trips-transports', label: 'الرحلات والنقل', icon: PlaneTakeoff },
     { id: 'finance', label: 'المالية والأرباح', icon: DollarSign },
+    { id: 'incentives-commissions', label: 'الحوافز والعمولات', icon: Award },
     { id: 'documents', label: 'خزينة المستندات', icon: FileText },
     { id: 'reports', label: 'مركز التقارير', icon: BarChart3 },
     { id: 'notifications', label: 'التنبيهات', icon: Bell, badge: unreadNotifs },
-    { id: 'staff', label: 'كادر الموظفين', icon: UserCheck },
+    { id: 'staff', label: 'الموظفون المسجلون', icon: UserCheck },
     { id: 'accounting-closing', label: 'قفل الفترات', icon: Lock },
-    { id: 'settings', label: 'إعدادات النظام', icon: Settings },
+    { id: 'settings', label: 'إعدادات النظام والنسخ', icon: Settings },
   ];
 
   return (
     <aside className="hidden lg:flex flex-col w-64 h-screen sticky top-0 bg-white dark:bg-[#151c2d] border-l border-slate-200 dark:border-slate-800 shadow-sm z-30 select-none">
-      {/* Brand Header */}
-      <div className="p-5 border-b border-slate-100 dark:border-slate-800/80 flex items-center gap-3">
-        <div className="w-11 h-11 rounded-xl gradient-gold flex items-center justify-center shadow-md shadow-amber-500/20 text-slate-950 font-bold shrink-0">
-          <Star className="w-6 h-6 fill-slate-950 stroke-slate-950" />
-        </div>
-        <div>
-          <h1 className="text-xl font-extrabold text-slate-900 dark:text-white font-cairo leading-tight">
-            ميجا ستار
-          </h1>
-          <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-            إدارة عمليات العمرة ERP
-          </p>
-        </div>
+      {/* Brand Header with Official Company Logo */}
+      <div className="p-4 border-b border-slate-100 dark:border-slate-800/80">
+        <CompanyLogo size="md" showText={true} />
       </div>
 
       {/* Navigation List */}

@@ -3,7 +3,7 @@ import { useStore } from '../lib/store';
 import { Bell, AlertTriangle, CheckCircle2, Clock, Calendar, ShieldAlert, FileWarning, PlaneTakeoff, DollarSign } from 'lucide-react';
 
 export const NotificationsPage: React.FC = () => {
-  const { notifications, markNotificationRead, pilgrims, trips } = useStore();
+  const { notifications, markNotificationRead, scanAndGenerateSmartAlerts } = useStore();
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -23,15 +23,25 @@ export const NotificationsPage: React.FC = () => {
             التنبيهات والملاحة التشغيلية
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            متابعة إقلاع الرحلات، صلاحية التأشيرات، استحقاق الفنادق والباركود
+            متابعة إقلاع الرحلات، صلاحية التأشيرات، تجديد الإقامات وجوازات السفر، واستحقاق الفنادق
           </p>
         </div>
 
-        <div className="flex items-center gap-3 bg-slate-100 dark:bg-slate-800 px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700">
-          <Bell className="w-5 h-5 text-amber-500" />
-          <span className="text-xs font-extrabold text-slate-900 dark:text-white">
-            {unreadCount} تنبيهات غير مقروءة
-          </span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => scanAndGenerateSmartAlerts()}
+            className="flex items-center gap-2 px-4 py-2.5 text-xs font-extrabold bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-2xl shadow-md transition-all cursor-pointer"
+          >
+            <ShieldAlert className="w-4 h-4" />
+            <span>فحص وإطلاق التنبيهات الذكية</span>
+          </button>
+
+          <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700">
+            <Bell className="w-5 h-5 text-amber-500" />
+            <span className="text-xs font-extrabold text-slate-900 dark:text-white">
+              {unreadCount} غير مقروءة
+            </span>
+          </div>
         </div>
       </div>
 
